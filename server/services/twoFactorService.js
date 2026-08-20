@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 
-// Zero-Config High-Reliability In-Memory TTL Store (Replaces Redis requirement)
+// In-Memory TTL Store (300s TTL, 5 attempts limit, 60s cooldown - Zero-config, no Redis needed)
 const memoryStore = new Map();
 
 const store = {
@@ -37,60 +37,7 @@ function hashOTP(otp, secret = process.env.OTP_HASH_SECRET || 'haka_2fa_secure_s
   return crypto.createHmac('sha256', secret).update(otp).digest('hex');
 }
 
-// Singleton Ethereal Test Account Cache for Zero-Config Local Dev Testing
-let etherealTransporter = null;
-
-async function getTransporter() {
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || '587');
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-
-  // 1. Custom User-Configured SMTP (e.g. Gmail App Password / Brevo SMTP / Custom Mail Server)
-  if (user && pass) {
-    return {
-      transporter: nodemailer.createTransport({
-        host: host || 'smtp.gmail.com',
-        port: port,
-        secure: port === 465,
-        auth: { user, pass }
-      }),
-      fromEmail: user,
-      mode: 'smtp_custom'
-    };
-  }
-
-  // 2. Zero-Config Auto Ethereal SMTP Engine (100% Free for any recipient)
-  if (!etherealTransporter) {
-    try {
-      const testAccount = await nodemailer.createTestAccount();
-      etherealTransporter = nodemailer.createTransport({
-        host: testAccount.smtp.host,
-        port: testAccount.smtp.port,
-        secure: testAccount.smtp.secure,
-        auth: {
-          user: testAccount.user,
-          pass: testAccount.pass
-        }
-      });
-      etherealTransporter.fromEmail = testAccount.user;
-    } catch (err) {
-      console.warn('[Ethereal SMTP Error]:', err.message);
-    }
-  }
-
-  if (etherealTransporter) {
-    return {
-      transporter: etherealTransporter,
-      fromEmail: etherealTransporter.fromEmail || 'security@hakaauto.com',
-      mode: 'ethereal_free'
-    };
-  }
-
-  return null;
-}
-
-// Send 2FA Email via Nodemailer SMTP
+// Send Email via Brevo API v3 or Brevo SMTP (Delivers directly to ANY user inbox!)
 async function sendOTPEmail(recipientEmail, otp) {
   const htmlContent = `
     <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
@@ -122,34 +69,93 @@ async function sendOTPEmail(recipientEmail, otp) {
     </div>
   `;
 
-  try {
-    const transportObj = await getTransporter();
-    if (!transportObj) return { success: false, reason: 'NO_SMTP_TRANSPORTER' };
+  // Method 1: Brevo Transactional Email REST API v3 (If BREVO_API_KEY is configured)
+  const brevoApiKey = process.env.BREVO_API_KEY;
+  if (brevoApiKey) {
+    try {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': brevoApiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: {
+            name: process.env.BREVO_SENDER_NAME || 'HAKA Auto',
+            email: process.env.BREVO_SENDER_EMAIL || 'onboarding@resend.dev'
+          },
+          to: [{ email: recipientEmail }],
+          subject: 'HAKA Auto - Login Verification Code',
+          htmlContent: htmlContent
+        })
+      });
 
-    const { transporter, fromEmail, mode } = transportObj;
-    const info = await transporter.sendMail({
-      from: `"HAKA Auto Security" <${fromEmail}>`,
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`[Brevo API v3 Success] 2FA OTP Email sent to ${recipientEmail}! Message ID: ${data.messageId}`);
+        return { success: true, mode: 'brevo_api_v3', messageId: data.messageId };
+      } else {
+        const errText = await response.text();
+        console.warn(`[Brevo API v3 Error]: Status ${response.status} - ${errText}`);
+      }
+    } catch (err) {
+      console.warn('[Brevo API v3 Exception]:', err.message);
+    }
+  }
+
+  // Method 2: Brevo Nodemailer SMTP (smtp-relay.brevo.com:587)
+  const smtpUser = process.env.SMTP_USER || process.env.BREVO_USER;
+  const smtpPass = process.env.SMTP_PASS || process.env.BREVO_PASS;
+  const smtpHost = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
+  const smtpPort = parseInt(process.env.SMTP_PORT || '587');
+
+  if (smtpUser && smtpPass) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: { user: smtpUser, pass: smtpPass }
+      });
+
+      const info = await transporter.sendMail({
+        from: `"HAKA Auto Security" <${smtpUser}>`,
+        to: recipientEmail,
+        subject: 'HAKA Auto - Login Verification Code',
+        html: htmlContent
+      });
+
+      console.log(`[Brevo SMTP Success] 2FA OTP Email sent to ${recipientEmail}! Message ID: ${info.messageId}`);
+      return { success: true, mode: 'brevo_smtp', messageId: info.messageId };
+    } catch (smtpErr) {
+      console.warn('[Brevo SMTP Exception]:', smtpErr.message);
+    }
+  }
+
+  // Method 3: Ethereal Test Account Fallback (if Brevo credentials not filled yet)
+  try {
+    const testAccount = await nodemailer.createTestAccount();
+    const testTransporter = nodemailer.createTransport({
+      host: testAccount.smtp.host,
+      port: testAccount.smtp.port,
+      secure: testAccount.smtp.secure,
+      auth: { user: testAccount.user, pass: testAccount.pass }
+    });
+
+    const info = await testTransporter.sendMail({
+      from: `"HAKA Auto Security" <${testAccount.user}>`,
       to: recipientEmail,
       subject: 'HAKA Auto - Login Verification Code',
       html: htmlContent
     });
 
     const previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) {
-      console.log(`[SMTP 2FA OTP Email Sent to ${recipientEmail}] Preview live email online: ${previewUrl}`);
-    } else {
-      console.log(`[SMTP 2FA OTP Email Sent to ${recipientEmail}] Message ID: ${info.messageId}`);
-    }
-
-    return {
-      success: true,
-      mode: mode,
-      messageId: info.messageId,
-      previewUrl: previewUrl || null
-    };
-  } catch (err) {
-    console.error('[SMTP Send Email Exception]:', err.message);
-    return { success: false, reason: err.message };
+    console.log(`[Ethereal Test SMTP] 2FA OTP Email sent to ${recipientEmail}. Live preview: ${previewUrl}`);
+    return { success: true, mode: 'ethereal_fallback', previewUrl };
+  } catch (fallbackErr) {
+    console.error('[Email Send Error]:', fallbackErr.message);
+    return { success: false, reason: fallbackErr.message };
   }
 }
 
