@@ -1,29 +1,98 @@
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
+const { createClient } = require('@supabase/supabase-js');
 
-// In-Memory TTL Store (300s TTL, 5 attempts limit, 60s cooldown - Zero-config, no Redis needed)
-const memoryStore = new Map();
+// Initialize Supabase Admin Client using Service Role Key for backend-only database access
+const supabaseUrl = process.env.SUPABASE_URL || 'https://sjujcjvmjaqqstpdldsj.supabase.co';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_PPmQk6Lyn3H7QApDy0YhoA_zi3xB3_e';
 
-const store = {
-  async get(key) {
-    const item = memoryStore.get(key);
-    if (!item) return null;
-    if (Date.now() > item.expiresAt) {
-      memoryStore.delete(key);
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+// Supabase PostgreSQL Challenge Store (Table: public.login_otp_challenges)
+const otpStore = {
+  // Get active OTP challenge for a user
+  async get(userId) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('login_otp_challenges')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error || !data) return null;
+
+      // Check if challenge is expired (expires_at)
+      if (new Date() > new Date(data.expires_at)) {
+        await this.del(userId);
+        return null;
+      }
+
+      return {
+        id: data.id,
+        userId: data.user_id,
+        otpHash: data.otp_hash,
+        attempts: data.attempts || 0,
+        expiresAt: data.expires_at,
+        lastSentAt: data.last_sent_at
+      };
+    } catch (err) {
+      console.warn('[Supabase OTP Table Get Error]:', err.message);
       return null;
     }
-    return item.value;
   },
 
-  async set(key, value, ttlSeconds = 300) {
-    memoryStore.set(key, {
-      value,
-      expiresAt: Date.now() + (ttlSeconds * 1000)
-    });
+  // Save or update OTP challenge (UPSERT into public.login_otp_challenges)
+  async set(userId, { otpHash, attempts = 0, ttlSeconds = 300 }) {
+    try {
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + (ttlSeconds * 1000)).toISOString();
+      const lastSentAt = now.toISOString();
+
+      const { error } = await supabaseAdmin
+        .from('login_otp_challenges')
+        .upsert(
+          {
+            user_id: userId,
+            otp_hash: otpHash,
+            attempts: attempts,
+            expires_at: expiresAt,
+            last_sent_at: lastSentAt,
+            created_at: now.toISOString()
+          },
+          { onConflict: 'user_id' }
+        );
+
+      if (error) {
+        console.error('[Supabase OTP Table Upsert Error]:', error.message);
+        throw error;
+      }
+    } catch (err) {
+      console.error('[Supabase OTP Table Set Exception]:', err.message);
+      throw err;
+    }
   },
 
-  async del(key) {
-    memoryStore.delete(key);
+  // Update attempt count in public.login_otp_challenges
+  async updateAttempts(userId, newAttempts) {
+    try {
+      await supabaseAdmin
+        .from('login_otp_challenges')
+        .update({ attempts: newAttempts })
+        .eq('user_id', userId);
+    } catch (err) {
+      console.warn('[Supabase OTP Update Attempts Error]:', err.message);
+    }
+  },
+
+  // Delete challenge (One-Time Use or Invalidation)
+  async del(userId) {
+    try {
+      await supabaseAdmin
+        .from('login_otp_challenges')
+        .delete()
+        .eq('user_id', userId);
+    } catch (err) {
+      console.warn('[Supabase OTP Table Delete Error]:', err.message);
+    }
   }
 };
 
@@ -37,8 +106,12 @@ function hashOTP(otp, secret = process.env.OTP_HASH_SECRET || 'haka_2fa_secure_s
   return crypto.createHmac('sha256', secret).update(otp).digest('hex');
 }
 
-// Send Email via Brevo API v3 or Brevo SMTP (Delivers directly to ANY user inbox!)
-async function sendOTPEmail(recipientEmail, otp) {
+// Brevo Transactional Email REST API v3 ONLY (POST https://api.brevo.com/v3/smtp/email)
+async function sendBrevoOTPEmail(recipientEmail, otp) {
+  const apiKey = process.env.BREVO_API_KEY;
+  const senderEmail = process.env.BREVO_SENDER_EMAIL || 'onboarding@resend.dev';
+  const senderName = process.env.BREVO_SENDER_NAME || 'HAKA Auto';
+
   const htmlContent = `
     <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
       <div style="text-align: center; margin-bottom: 28px;">
@@ -69,113 +142,50 @@ async function sendOTPEmail(recipientEmail, otp) {
     </div>
   `;
 
-  // Method 1: Brevo Transactional Email REST API v3 (If BREVO_API_KEY is configured)
-  const brevoApiKey = process.env.BREVO_API_KEY;
-  if (brevoApiKey) {
-    try {
-      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-          'api-key': brevoApiKey,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          sender: {
-            name: process.env.BREVO_SENDER_NAME || 'HAKA Auto',
-            email: process.env.BREVO_SENDER_EMAIL || 'onboarding@resend.dev'
-          },
-          to: [{ email: recipientEmail }],
-          subject: 'HAKA Auto - Login Verification Code',
-          htmlContent: htmlContent
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`[Brevo API v3 Success] 2FA OTP Email sent to ${recipientEmail}! Message ID: ${data.messageId}`);
-        return { success: true, mode: 'brevo_api_v3', messageId: data.messageId };
-      } else {
-        const errText = await response.text();
-        console.warn(`[Brevo API v3 Error]: Status ${response.status} - ${errText}`);
-      }
-    } catch (err) {
-      console.warn('[Brevo API v3 Exception]:', err.message);
-    }
+  if (!apiKey) {
+    console.warn('[Brevo API Error] BREVO_API_KEY is missing in server/.env.');
+    return { success: false, reason: 'BREVO_API_KEY_MISSING' };
   }
 
-  // Method 2: Brevo Nodemailer SMTP (smtp-relay.brevo.com:587)
-  const smtpUser = process.env.SMTP_USER || process.env.BREVO_USER;
-  const smtpPass = process.env.SMTP_PASS || process.env.BREVO_PASS;
-  const smtpHost = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
-  const smtpPort = parseInt(process.env.SMTP_PORT || '587');
-
-  if (smtpUser && smtpPass) {
-    try {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: { user: smtpUser, pass: smtpPass }
-      });
-
-      const info = await transporter.sendMail({
-        from: `"HAKA Auto Security" <${smtpUser}>`,
-        to: recipientEmail,
-        subject: 'HAKA Auto - Login Verification Code',
-        html: htmlContent
-      });
-
-      console.log(`[Brevo SMTP Success] 2FA OTP Email sent to ${recipientEmail}! Message ID: ${info.messageId}`);
-      return { success: true, mode: 'brevo_smtp', messageId: info.messageId };
-    } catch (smtpErr) {
-      console.warn('[Brevo SMTP Exception]:', smtpErr.message);
-    }
-  }
-
-  // Method 3: Ethereal Test Account Fallback (if Brevo credentials not filled yet)
   try {
-    const testAccount = await nodemailer.createTestAccount();
-    const testTransporter = nodemailer.createTransport({
-      host: testAccount.smtp.host,
-      port: testAccount.smtp.port,
-      secure: testAccount.smtp.secure,
-      auth: { user: testAccount.user, pass: testAccount.pass }
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        sender: { name: senderName, email: senderEmail },
+        to: [{ email: recipientEmail }],
+        subject: 'HAKA Auto - Login Verification Code',
+        htmlContent: htmlContent
+      })
     });
 
-    const info = await testTransporter.sendMail({
-      from: `"HAKA Auto Security" <${testAccount.user}>`,
-      to: recipientEmail,
-      subject: 'HAKA Auto - Login Verification Code',
-      html: htmlContent
-    });
-
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    console.log(`[Ethereal Test SMTP] 2FA OTP Email sent to ${recipientEmail}. Live preview: ${previewUrl}`);
-    return { success: true, mode: 'ethereal_fallback', previewUrl };
-  } catch (fallbackErr) {
-    console.error('[Email Send Error]:', fallbackErr.message);
-    return { success: false, reason: fallbackErr.message };
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`[Brevo REST API Success] 2FA OTP Email sent to ${recipientEmail}! Message ID: ${data.messageId}`);
+      return { success: true, messageId: data.messageId };
+    } else {
+      const errText = await response.text();
+      console.error('[Brevo REST API Error]:', errText);
+      return { success: false, reason: errText };
+    }
+  } catch (err) {
+    console.error('[Brevo REST API Exception]:', err.message);
+    return { success: false, reason: err.message };
   }
 }
 
 // Log Security Audit Event to Supabase security_audit_logs
 async function logSecurityAudit({ action, status, email, userId, description }) {
-  const supabaseUrl = process.env.SUPABASE_URL || 'https://sjujcjvmjaqqstpdldsj.supabase.co';
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseKey) return;
+  if (!supabaseUrl || !supabaseServiceKey) return;
 
   try {
-    await fetch(`${supabaseUrl}/rest/v1/security_audit_logs`, {
-      method: 'POST',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
-      },
-      body: JSON.stringify({
+    await supabaseAdmin
+      .from('security_audit_logs')
+      .insert({
         actor_user_id: userId || null,
         actor_email: email || null,
         target_user_id: userId || null,
@@ -184,17 +194,16 @@ async function logSecurityAudit({ action, status, email, userId, description }) 
         description: description || null,
         user_agent: 'HAKA-Auto-2FA-Backend/1.0',
         created_at: new Date().toISOString()
-      })
-    });
+      });
   } catch (err) {
     console.warn('[Security Audit Logging Error]:', err.message);
   }
 }
 
 module.exports = {
-  redis: store,
+  otpStore,
   generateOTP,
   hashOTP,
-  sendOTPEmail,
+  sendBrevoOTPEmail,
   logSecurityAudit
 };
