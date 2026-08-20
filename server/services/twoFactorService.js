@@ -1,26 +1,11 @@
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
-// In-Memory Fallback TTL Store for Local Dev when Upstash Redis variables are not configured
+// Zero-Config High-Reliability In-Memory TTL Store (Replaces Redis requirement)
 const memoryStore = new Map();
 
-// Upstash Redis REST wrapper with High-Reliability Local Fallback
-const redis = {
+const store = {
   async get(key) {
-    const url = process.env.UPSTASH_REDIS_REST_URL;
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-    if (url && token) {
-      try {
-        const res = await fetch(`${url}/get/${key}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const data = await res.json();
-        return data.result ? JSON.parse(data.result) : null;
-      } catch (err) {
-        console.warn('[Upstash Redis] REST fetch failed, using memory fallback:', err.message);
-      }
-    }
-
     const item = memoryStore.get(key);
     if (!item) return null;
     if (Date.now() > item.expiresAt) {
@@ -31,20 +16,6 @@ const redis = {
   },
 
   async set(key, value, ttlSeconds = 300) {
-    const url = process.env.UPSTASH_REDIS_REST_URL;
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-    if (url && token) {
-      try {
-        await fetch(`${url}/set/${key}/${encodeURIComponent(JSON.stringify(value))}/EX/${ttlSeconds}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        return;
-      } catch (err) {
-        console.warn('[Upstash Redis] REST set failed, using memory fallback:', err.message);
-      }
-    }
-
     memoryStore.set(key, {
       value,
       expiresAt: Date.now() + (ttlSeconds * 1000)
@@ -52,19 +23,6 @@ const redis = {
   },
 
   async del(key) {
-    const url = process.env.UPSTASH_REDIS_REST_URL;
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-    if (url && token) {
-      try {
-        await fetch(`${url}/del/${key}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-      } catch (err) {
-        console.warn('[Upstash Redis] REST del failed:', err.message);
-      }
-    }
-
     memoryStore.delete(key);
   }
 };
@@ -79,12 +37,61 @@ function hashOTP(otp, secret = process.env.OTP_HASH_SECRET || 'haka_2fa_secure_s
   return crypto.createHmac('sha256', secret).update(otp).digest('hex');
 }
 
-// Brevo Transactional Email API Delivery
-async function sendBrevoOTPEmail(recipientEmail, otp) {
-  const apiKey = process.env.BREVO_API_KEY;
-  const senderEmail = process.env.BREVO_SENDER_EMAIL || 'onboarding@resend.dev';
-  const senderName = process.env.BREVO_SENDER_NAME || 'HAKA Auto';
+// Singleton Ethereal Test Account Cache for Zero-Config Local Dev Testing
+let etherealTransporter = null;
 
+async function getTransporter() {
+  const host = process.env.SMTP_HOST;
+  const port = parseInt(process.env.SMTP_PORT || '587');
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+
+  // 1. Custom User-Configured SMTP (e.g. Gmail App Password / Brevo SMTP / Custom Mail Server)
+  if (user && pass) {
+    return {
+      transporter: nodemailer.createTransport({
+        host: host || 'smtp.gmail.com',
+        port: port,
+        secure: port === 465,
+        auth: { user, pass }
+      }),
+      fromEmail: user,
+      mode: 'smtp_custom'
+    };
+  }
+
+  // 2. Zero-Config Auto Ethereal SMTP Engine (100% Free for any recipient)
+  if (!etherealTransporter) {
+    try {
+      const testAccount = await nodemailer.createTestAccount();
+      etherealTransporter = nodemailer.createTransport({
+        host: testAccount.smtp.host,
+        port: testAccount.smtp.port,
+        secure: testAccount.smtp.secure,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass
+        }
+      });
+      etherealTransporter.fromEmail = testAccount.user;
+    } catch (err) {
+      console.warn('[Ethereal SMTP Error]:', err.message);
+    }
+  }
+
+  if (etherealTransporter) {
+    return {
+      transporter: etherealTransporter,
+      fromEmail: etherealTransporter.fromEmail || 'security@hakaauto.com',
+      mode: 'ethereal_free'
+    };
+  }
+
+  return null;
+}
+
+// Send 2FA Email via Nodemailer SMTP
+async function sendOTPEmail(recipientEmail, otp) {
   const htmlContent = `
     <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
       <div style="text-align: center; margin-bottom: 28px;">
@@ -115,43 +122,38 @@ async function sendBrevoOTPEmail(recipientEmail, otp) {
     </div>
   `;
 
-  if (!apiKey) {
-    console.warn('[Brevo API Warning] BREVO_API_KEY is not configured in server/.env.');
-    return { success: false, reason: 'BREVO_API_KEY_MISSING' };
-  }
-
   try {
-    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: {
-        'api-key': apiKey,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({
-        sender: { name: senderName, email: senderEmail },
-        to: [{ email: recipientEmail }],
-        subject: 'HAKA Auto - Login Verification Code',
-        htmlContent: htmlContent
-      })
+    const transportObj = await getTransporter();
+    if (!transportObj) return { success: false, reason: 'NO_SMTP_TRANSPORTER' };
+
+    const { transporter, fromEmail, mode } = transportObj;
+    const info = await transporter.sendMail({
+      from: `"HAKA Auto Security" <${fromEmail}>`,
+      to: recipientEmail,
+      subject: 'HAKA Auto - Login Verification Code',
+      html: htmlContent
     });
 
-    if (response.ok) {
-      const data = await response.json();
-      return { success: true, messageId: data.messageId };
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      console.log(`[SMTP 2FA OTP Email Sent to ${recipientEmail}] Preview live email online: ${previewUrl}`);
     } else {
-      const errText = await response.text();
-      console.error('[Brevo API Error]:', errText);
-      return { success: false, reason: errText };
+      console.log(`[SMTP 2FA OTP Email Sent to ${recipientEmail}] Message ID: ${info.messageId}`);
     }
+
+    return {
+      success: true,
+      mode: mode,
+      messageId: info.messageId,
+      previewUrl: previewUrl || null
+    };
   } catch (err) {
-    console.error('[Brevo Fetch Exception]:', err.message);
+    console.error('[SMTP Send Email Exception]:', err.message);
     return { success: false, reason: err.message };
   }
 }
 
 // Log Security Audit Event to Supabase security_audit_logs
-// CRITICAL: NEVER log OTP, plain string, or sensitive data in description
 async function logSecurityAudit({ action, status, email, userId, description }) {
   const supabaseUrl = process.env.SUPABASE_URL || 'https://sjujcjvmjaqqstpdldsj.supabase.co';
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -184,9 +186,9 @@ async function logSecurityAudit({ action, status, email, userId, description }) 
 }
 
 module.exports = {
-  redis,
+  redis: store,
   generateOTP,
   hashOTP,
-  sendBrevoOTPEmail,
+  sendOTPEmail,
   logSecurityAudit
 };
