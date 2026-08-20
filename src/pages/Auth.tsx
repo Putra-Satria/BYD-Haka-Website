@@ -234,14 +234,23 @@ export default function Auth() {
   };
 
   useEffect(() => {
-    // Only check session on mount if user isn't actively on login mode query
     const checkActiveSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        // Allow user to view login page if mode=login explicitly
+      if (session?.user) {
+        await checkUserRole(session.user.id);
       }
     };
     checkActiveSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")) {
+        await checkUserRole(session.user.id);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -262,7 +271,7 @@ export default function Auth() {
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: validated.email,
         options: {
-          emailRedirectTo: `${window.location.origin}/`,
+          emailRedirectTo: `${window.location.origin}/auth`,
         },
       });
 
