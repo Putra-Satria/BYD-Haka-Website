@@ -27,10 +27,6 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 
-// 2FA Production Router
-const twoFactorRouter = require('./routes/twoFactor');
-app.use('/api/2fa', twoFactorRouter);
-
 // Token Cache
 let wazuhToken = null;
 let tokenExpiresAt = 0;
