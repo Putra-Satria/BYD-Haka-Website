@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { z } from "zod";
 import { buildSecureFilePath, logSecurityAudit, validateSecureUpload } from "@/lib/securityHardening";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Mail, CheckCircle2, RefreshCw } from "lucide-react";
 import TopNav from "@/components/TopNav";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -62,6 +62,7 @@ export default function Auth() {
   const mode = searchParams.get("mode");
   const [isLogin, setIsLogin] = useState(mode !== "register");
   const [loading, setLoading] = useState(false);
+  const [is2FASent, setIs2FASent] = useState(false);
 
   useEffect(() => {
     setIsLogin(mode !== "register");
@@ -257,10 +258,18 @@ export default function Auth() {
 
       if (error) throw error;
 
-      toast.success("Login successful!");
-      if (data.user) {
-        await checkUserRole(data.user.id);
-      }
+      // Factor 1 (Password) Verified! Step 2: Trigger 2FA Email Link via Supabase Auth
+      const { error: otpError } = await supabase.auth.signInWithOtp({
+        email: validated.email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/`,
+        },
+      });
+
+      if (otpError) throw otpError;
+
+      setIs2FASent(true);
+      toast.success("Password verified! Security verification link sent to your email.");
     } catch (error: any) {
       console.error("Login Check Error:", error);
       if (error instanceof z.ZodError) {
@@ -492,43 +501,108 @@ export default function Auth() {
 
             <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-6">
               {isLogin ? (
-                /* LOGIN FORM */
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="email" className="text-sm font-medium text-gray-700">Email</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="Enter Email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                      className="bg-gray-50 border-gray-200 focus:bg-white transition-colors"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="password" className="text-sm font-medium text-gray-700">Password</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      placeholder="Password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      className="bg-gray-50 border-gray-200 focus:bg-white transition-colors"
-                    />
-                  </div>
+                is2FASent ? (
+                  /* 2FA EMAIL VERIFICATION SENT VIEW */
+                  <div className="space-y-6 text-center py-2">
+                    <div className="mx-auto w-16 h-16 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center">
+                      <Mail className="w-8 h-8 text-blue-600 animate-bounce" />
+                    </div>
 
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setShowForgotPassword(true)}
-                      className="text-sm font-medium text-primary hover:underline"
-                    >
-                      Forgot Password?
-                    </button>
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-900">Security Verification Sent</h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Password verified! We've sent a 2-step login verification link to:
+                      </p>
+                      <div className="mt-2.5 inline-block px-3.5 py-1 bg-blue-50 border border-blue-200 rounded-full text-xs font-semibold text-blue-700">
+                        {email}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-600 text-left space-y-2.5 shadow-sm">
+                      <div className="flex items-start gap-2.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                        <span><strong>Step 1 (Password):</strong> Confirmed & Verified.</span>
+                      </div>
+                      <div className="flex items-start gap-2.5">
+                        <Mail className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                        <span><strong>Step 2 (Email Link):</strong> Open your email inbox on your phone or laptop and click the <strong>Log In</strong> link to complete verification and enter your dashboard.</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2.5 pt-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={async () => {
+                          setLoading(true);
+                          try {
+                            const { error: resendErr } = await supabase.auth.signInWithOtp({
+                              email: email,
+                              options: { emailRedirectTo: `${window.location.origin}/` },
+                            });
+                            if (resendErr) throw resendErr;
+                            toast.success("Security verification link re-sent!");
+                          } catch (err: any) {
+                            toast.error(err.message || "Failed to resend link");
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                        disabled={loading}
+                        className="w-full gap-2 border-gray-300 text-slate-700"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                        Resend Verification Link
+                      </Button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIs2FASent(false)}
+                        className="text-xs font-medium text-slate-500 hover:text-slate-700 underline mt-1"
+                      >
+                        Back to Login Form
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  /* STANDARD LOGIN FORM */
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="email" className="text-sm font-medium text-gray-700">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="Enter Email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        className="bg-gray-50 border-gray-200 focus:bg-white transition-colors"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="password" className="text-sm font-medium text-gray-700">Password</Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        placeholder="Password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        className="bg-gray-50 border-gray-200 focus:bg-white transition-colors"
+                      />
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotPassword(true)}
+                        className="text-sm font-medium text-primary hover:underline"
+                      >
+                        Forgot Password?
+                      </button>
+                    </div>
+                  </div>
+                )
               ) : (
                 /* REGISTER FORM */
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
