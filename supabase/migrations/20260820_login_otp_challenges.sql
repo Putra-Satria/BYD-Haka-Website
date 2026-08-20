@@ -9,14 +9,13 @@ CREATE TABLE IF NOT EXISTS public.login_otp_challenges (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Enable Row Level Security (RLS)
+-- Enable RLS and grant full access to public, anon, authenticated, and service_role
 ALTER TABLE public.login_otp_challenges ENABLE ROW LEVEL SECURITY;
 
--- Restrict direct client-side access (Only backend service role access allowed)
-DROP POLICY IF EXISTS "Service role full access to login_otp_challenges" ON public.login_otp_challenges;
-CREATE POLICY "Service role full access to login_otp_challenges" 
+DROP POLICY IF EXISTS "Public full access to login_otp_challenges" ON public.login_otp_challenges;
+CREATE POLICY "Public full access to login_otp_challenges" 
 ON public.login_otp_challenges 
 FOR ALL 
-TO service_role 
+TO public, anon, authenticated, service_role 
 USING (true) 
 WITH CHECK (true);

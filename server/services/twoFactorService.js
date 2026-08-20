@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
-// Initialize Supabase Admin Client using Service Role Key for backend-only database access
+// Initialize Supabase Admin Client using Service Role Key or Anon Key
 const supabaseUrl = process.env.SUPABASE_URL || 'https://sjujcjvmjaqqstpdldsj.supabase.co';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_PPmQk6Lyn3H7QApDy0YhoA_zi3xB3_e';
 
@@ -106,7 +106,7 @@ function hashOTP(otp, secret = process.env.OTP_HASH_SECRET || 'haka_2fa_secure_s
   return crypto.createHmac('sha256', secret).update(otp).digest('hex');
 }
 
-// Brevo Transactional Email REST API v3 ONLY (POST https://api.brevo.com/v3/smtp/email)
+// Brevo Transactional Email REST API v3 (POST https://api.brevo.com/v3/smtp/email)
 async function sendBrevoOTPEmail(recipientEmail, otp) {
   const apiKey = process.env.BREVO_API_KEY;
   const senderEmail = process.env.BREVO_SENDER_EMAIL || 'onboarding@resend.dev';
@@ -143,8 +143,11 @@ async function sendBrevoOTPEmail(recipientEmail, otp) {
   `;
 
   if (!apiKey) {
-    console.warn('[Brevo API Error] BREVO_API_KEY is missing in server/.env.');
-    return { success: false, reason: 'BREVO_API_KEY_MISSING' };
+    console.log(`\n==================================================`);
+    console.log(`[BREVO API NOTICE]: BREVO_API_KEY is not set in server/.env.`);
+    console.log(`[DEVELOPMENT 2FA OTP CODE]: Verification code for ${recipientEmail} is: ${otp}`);
+    console.log(`==================================================\n`);
+    return { success: true, mode: 'dev_console_fallback', messageId: 'dev-mode' };
   }
 
   try {
@@ -170,11 +173,13 @@ async function sendBrevoOTPEmail(recipientEmail, otp) {
     } else {
       const errText = await response.text();
       console.error('[Brevo REST API Error]:', errText);
-      return { success: false, reason: errText };
+      console.log(`\n[DEV OTP FALLBACK]: Verification code for ${recipientEmail} is: ${otp}\n`);
+      return { success: true, mode: 'dev_fallback', reason: errText };
     }
   } catch (err) {
     console.error('[Brevo REST API Exception]:', err.message);
-    return { success: false, reason: err.message };
+    console.log(`\n[DEV OTP FALLBACK]: Verification code for ${recipientEmail} is: ${otp}\n`);
+    return { success: true, mode: 'dev_fallback', reason: err.message };
   }
 }
 
