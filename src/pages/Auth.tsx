@@ -90,6 +90,7 @@ export default function Auth() {
 
   const [educationLevel, setEducationLevel] = useState("");
   const [emailError, setEmailError] = useState(false); // Add email error state
+  const [isLinkVerified, setIsLinkVerified] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -234,79 +235,69 @@ export default function Auth() {
   };
 
   useEffect(() => {
-    // 1. Initial Session Check on Mount
-    const checkActiveSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const is2FAPending = localStorage.getItem("haka_2fa_pending") === "true";
-      const isVerifiedByLink = localStorage.getItem("haka_2fa_verified_by_link") === "true";
+    const handleAuthCallback = async () => {
+      const flow = searchParams.get("flow");
+      const type = searchParams.get("type");
+      const isSignupCallback = flow === "signup" || type === "signup";
+      const isLoginCallback = flow === "login" || searchParams.get("2fa_verified") === "true";
 
-      if (session?.user) {
-        if (is2FAPending && !isVerifiedByLink) {
-          setIs2FASent(true);
-          setEmail(session.user.email || "");
-          return;
-        }
-        await checkUserRole(session.user.id);
-      }
-    };
-
-    checkActiveSession();
-
-    // 2. Cross-Tab LocalStorage Event Listener
-    const handleStorageChange = async (e: StorageEvent) => {
-      if (e.key === "haka_2fa_verified_event") {
-        localStorage.removeItem("haka_2fa_pending");
-        localStorage.removeItem("haka_2fa_verified_by_link");
+      // 1. Registration Verification Callback: User clicked email confirmation link
+      if (isSignupCallback) {
+        // Sign out temporary session so user is redirected to Login page
+        await supabase.auth.signOut();
+        setIsLogin(true);
         setIs2FASent(false);
-        toast.success("2-Step verification completed across tabs!");
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
+        toast.success("Email verified successfully, please sign in");
+        navigate("/auth", { replace: true });
+        return;
+      }
+
+      // 2. Login Verification / Session check on mount
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        if (isLoginCallback || window.location.hash.includes("access_token")) {
+          sessionStorage.setItem("2fa_passed", "true");
+          setIs2FASent(false);
           await checkUserRole(session.user.id);
+        } else {
+          if (sessionStorage.getItem("2fa_passed") === "true") {
+            await checkUserRole(session.user.id);
+          } else {
+            // Force sign out unverified cached session on auth mount
+            await supabase.auth.signOut();
+          }
         }
       }
     };
-    window.addEventListener("storage", handleStorageChange);
 
-    // 3. Auth State Event Listener
+    handleAuthCallback();
+
+    // Cross-tab & Auth State Event Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        const is2FAPending = localStorage.getItem("haka_2fa_pending") === "true";
-        const isNewUserRegistration = localStorage.getItem("haka_new_user_reg") === "true";
-        const isVerifiedByLink = localStorage.getItem("haka_2fa_verified_by_link") === "true" || window.location.search.includes("2fa_verified") || window.location.hash.includes("access_token");
+      const flow = new URLSearchParams(window.location.search).get("flow");
+      const type = new URLSearchParams(window.location.search).get("type");
 
-        // Case A: Newly registered user (bypasses 2FA on first registration login)
-        if (isNewUserRegistration) {
-          localStorage.removeItem("haka_new_user_reg");
-          localStorage.removeItem("haka_2fa_pending");
-          localStorage.removeItem("haka_2fa_verified_by_link");
+      if (event === "SIGNED_IN" && session?.user) {
+        if (flow === "signup" || type === "signup") {
+          await supabase.auth.signOut();
+          setIsLogin(true);
           setIs2FASent(false);
-          await checkUserRole(session.user.id);
+          toast.success("Email verified successfully, please sign in");
+          navigate("/auth", { replace: true });
           return;
         }
 
-        // Case B: Existing user logging in -> MUST STOP AT 2FA SCREEN UNTIL VERIFIED!
-        if (is2FAPending && !isVerifiedByLink) {
-          setIs2FASent(true);
-          setEmail(session.user.email || "");
-          return;
-        }
-
-        // Case C: User completed 2FA link verification
-        if (isVerifiedByLink) {
-          localStorage.removeItem("haka_2fa_pending");
-          localStorage.removeItem("haka_2fa_verified_by_link");
-          localStorage.setItem("haka_2fa_verified_event", Date.now().toString());
-          setIs2FASent(false);
-          await checkUserRole(session.user.id);
-        }
+        // Verified login via magic link
+        sessionStorage.setItem("2fa_passed", "true");
+        setIs2FASent(false);
+        await checkUserRole(session.user.id);
       }
     });
 
     return () => {
-      window.removeEventListener("storage", handleStorageChange);
       subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, [navigate, searchParams]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -315,6 +306,7 @@ export default function Auth() {
       const validated = loginSchema.parse({ email, password });
       setLoading(true);
 
+      // Step 1: Verify Password
       const { data, error } = await supabase.auth.signInWithPassword({
         email: validated.email,
         password: validated.password,
@@ -322,29 +314,15 @@ export default function Auth() {
 
       if (error) throw error;
 
-      // Check if user is a newly registered user (logged in right after signup)
-      const isNewUserRegistration = localStorage.getItem("haka_new_user_reg") === "true";
+      // Step 2: Password correct! Immediately clear temporary local session so protected routes cannot be bypassed
+      await supabase.auth.signOut();
 
-      if (isNewUserRegistration) {
-        // Newly registered user DOES NOT need 2FA again on first login!
-        localStorage.removeItem("haka_new_user_reg");
-        localStorage.removeItem("haka_2fa_pending");
-        toast.success("Login successful! Welcome to HAKA Auto.");
-        if (data.user) {
-          await checkUserRole(data.user.id);
-        }
-        return;
-      }
-
-      // Existing User Login -> FORCE 2FA SECURITY VERIFICATION SCREEN!
-      localStorage.setItem("haka_2fa_pending", "true");
-      localStorage.removeItem("haka_2fa_verified_by_link");
-      setIs2FASent(true);
-
+      // Step 3: Send Magic Link / Sign-In Verification Link
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: validated.email,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth?2fa_verified=true`,
+          shouldCreateUser: false,
+          emailRedirectTo: `${window.location.origin}/auth?flow=login`,
         },
       });
 
@@ -357,7 +335,7 @@ export default function Auth() {
         }
       } else {
         setIs2FASent(true);
-        toast.success("Password verified! Security verification link sent to your email.");
+        toast.success("Password verified! Sign-in verification link sent to your email.");
       }
     } catch (error: any) {
       console.error("Login Check Error:", error);
@@ -510,14 +488,13 @@ export default function Auth() {
         password: validated.password,
         options: {
           data: metadata,
-          emailRedirectTo: `${window.location.origin}/auth?type=signup`,
+          emailRedirectTo: `${window.location.origin}/auth?flow=signup`,
         },
       });
 
       if (authError) throw authError;
 
       if (authData.user) {
-        localStorage.setItem("haka_new_user_reg", "true");
         toast.success("Registration successful! Please check your email to verify your account.");
         setIsLogin(true); // Switch to login view
       }
@@ -626,9 +603,7 @@ export default function Auth() {
                         onClick={async () => {
                           setLoading(true);
                           try {
-                            localStorage.setItem("haka_2fa_verified_by_link", "true");
-                            localStorage.removeItem("haka_2fa_pending");
-                            localStorage.removeItem("haka_new_user_reg");
+                            // verification already done, just redirect
                             setIs2FASent(false);
                             toast.success("Security 2-Step Verification Completed!");
                             const { data: { session } } = await supabase.auth.getSession();
@@ -643,7 +618,7 @@ export default function Auth() {
                             setLoading(false);
                           }
                         }}
-                        disabled={loading}
+                        disabled={loading || !isLinkVerified}
                         className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg shadow-sm transition-colors"
                       >
                         Verify & Continue to Dashboard
@@ -657,7 +632,10 @@ export default function Auth() {
                           try {
                             const { error: resendErr } = await supabase.auth.signInWithOtp({
                               email: email,
-                              options: { emailRedirectTo: `${window.location.origin}/auth?2fa_verified=true` },
+                              options: {
+                                shouldCreateUser: false,
+                                emailRedirectTo: `${window.location.origin}/auth?flow=login`,
+                              },
                             });
                             if (resendErr) throw resendErr;
                             toast.success("Security verification link re-sent!");
@@ -674,16 +652,18 @@ export default function Auth() {
                         Resend Verification Link
                       </Button>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          localStorage.removeItem("haka_2fa_pending");
-                          setIs2FASent(false);
-                        }}
-                        className="text-xs font-medium text-slate-500 hover:text-slate-700 underline mt-1"
-                      >
-                        Back to Login Form
-                      </button>
+                       { !isLinkVerified && (
+                       <button
+                         type="button"
+                         onClick={() => {
+                           localStorage.removeItem("haka_2fa_pending");
+                           setIs2FASent(false);
+                         }}
+                         className="text-xs font-medium text-slate-500 hover:text-slate-700 underline mt-1"
+                       >
+                         Back to Login Form
+                       </button>
+                       ) }
                     </div>
                   </div>
                 ) : (

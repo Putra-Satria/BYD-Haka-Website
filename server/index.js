@@ -5,8 +5,19 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
+const { createClient } = require('@supabase/supabase-js');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://sjujcjvmjaqqstpdldsj.supabase.co";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+let supabaseAdmin = null;
+if (SUPABASE_SERVICE_ROLE_KEY) {
+  supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+}
+
 const WAZUH_URL = process.env.WAZUH_API_URL || 'https://localhost:55000';
 const INDEXER_URL = 'https://localhost:9200'; // commonly 9200 for indexer
 const WAZUH_USER = process.env.WAZUH_API_USER || 'admin';
@@ -231,6 +242,76 @@ app.get('/api/wazuh-alerts/summary', async (req, res, next) => {
 
     } catch (error) {
         res.status(503).json({ error: 'Wazuh API unavailable', details: error.message });
+    }
+});
+
+app.post('/api/admin/create-user', async (req, res) => {
+    try {
+        const { email, password, full_name, department, role } = req.body;
+
+        if (!email) {
+            return res.status(400).json({ error: 'Email is required' });
+        }
+
+        const normalizedEmail = email.trim().toLowerCase();
+
+        if (!supabaseAdmin) {
+            return res.status(500).json({ 
+                error: 'SUPABASE_SERVICE_ROLE_KEY is not set in server/.env' 
+            });
+        }
+
+        const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+        if (listErr) throw listErr;
+
+        const existingUser = listData?.users?.find(u => u.email?.toLowerCase() === normalizedEmail);
+        let userId = '';
+
+        if (existingUser) {
+            userId = existingUser.id;
+            await supabaseAdmin.from('profiles').update({
+                full_name: full_name?.trim() || existingUser.user_metadata?.full_name || normalizedEmail.split('@')[0],
+                department: department || 'General',
+                access_disabled: false,
+            }).eq('user_id', userId);
+        } else {
+            if (!password || password.length < 6) {
+                return res.status(400).json({ error: 'Password minimal 6 karakter wajib diisi untuk akun baru' });
+            }
+
+            const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+                email: normalizedEmail,
+                password: password,
+                email_confirm: true,
+                user_metadata: {
+                    full_name: full_name?.trim() || normalizedEmail.split('@')[0],
+                },
+            });
+
+            if (createErr) throw createErr;
+            userId = newUser.user.id;
+
+            await supabaseAdmin.from('profiles').update({
+                department: department || 'General',
+                access_disabled: false,
+            }).eq('user_id', userId);
+        }
+
+        const targetRole = role || 'user';
+        await supabaseAdmin.from('user_roles').delete().eq('user_id', userId);
+        await supabaseAdmin.from('user_roles').insert({
+            user_id: userId,
+            role: targetRole,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: existingUser ? 'User updated successfully' : 'User created successfully in Supabase Auth',
+            user_id: userId,
+        });
+    } catch (err) {
+        console.error('Error creating user in backend:', err);
+        return res.status(400).json({ error: err.message || 'Failed to process user' });
     }
 });
 

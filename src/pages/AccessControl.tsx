@@ -233,6 +233,7 @@ export default function AccessControl() {
     useState({
       full_name: "",
       email: "",
+      password: "",
       department: "",
       role: "user" as AppRole,
     });
@@ -771,246 +772,182 @@ export default function AccessControl() {
       !addForm.department ||
       !addForm.role
     ) {
-      toast.error(
-        "Semua field wajib diisi."
-      );
-
+      toast.error("Semua field (Nama, Email, Divisi, Role) wajib diisi.");
       return;
     }
 
-
-    // HR tidak boleh add Admin
-    if (
-      isRecruiter &&
-      !isAdmin &&
-      addForm.role === "admin"
-    ) {
-      toast.error(
-        "HRD tidak dapat menambahkan role Admin."
-      );
-
+    if (isRecruiter && !isAdmin && addForm.role === "admin") {
+      toast.error("HRD tidak dapat menambahkan role Admin.");
       return;
     }
-
 
     setAddingUser(true);
 
-
     try {
-      const normalizedEmail =
-        addForm.email
-          .trim()
-          .toLowerCase();
+      const normalizedEmail = addForm.email.trim().toLowerCase();
 
+      // 1. Cari profile user di database (case-insensitive ilike search)
+      const { data: profile, error: profileError } = await db
+        .from("profiles")
+        .select(`
+          user_id,
+          full_name,
+          email,
+          department,
+          access_disabled
+        `)
+        .ilike("email", normalizedEmail)
+        .maybeSingle();
 
-      // ========================================================
-      // CARI USER EXISTING
-      // ========================================================
+      if (profileError) throw profileError;
 
-      const {
-        data: profile,
-        error: profileError,
-      } =
-        await db
-          .from("profiles")
-          .select(`
-            user_id,
-            full_name,
-            email,
-            department,
-            access_disabled
-          `)
-          .eq(
-            "email",
-            normalizedEmail
-          )
-          .maybeSingle();
-
-
-      if (profileError) {
-        throw profileError;
-      }
-
-
-      if (!profile) {
-        throw new Error(
-          "Email belum terdaftar pada sistem. Buat account terlebih dahulu melalui Supabase Authentication atau registration."
-        );
-      }
-
-
-      // ========================================================
-      // AMBIL ROLE LAMA
-      // ========================================================
-
-      const {
-        data: roleRows,
-        error: roleFetchError,
-      } =
-        await db
+      // 2. Jika User SUDAH TERDAFTAR di database -> Langsung update Divisi & Assign Role!
+      if (profile) {
+        const { data: roleRows, error: roleFetchError } = await db
           .from("user_roles")
-          .select(
-            "role"
-          )
-          .eq(
-            "user_id",
-            profile.user_id
-          );
+          .select("role")
+          .eq("user_id", profile.user_id);
 
+        if (roleFetchError) throw roleFetchError;
 
-      if (roleFetchError) {
-        throw roleFetchError;
-      }
+        const currentRoles: AppRole[] = (roleRows ?? []).map((row: any) => row.role as AppRole);
+        let currentRole: AppRole = "user";
+        if (currentRoles.includes("admin")) currentRole = "admin";
+        else if (currentRoles.includes("recruiter")) currentRole = "recruiter";
 
+        if (isRecruiter && !isAdmin && currentRole === "admin") {
+          throw new Error("HRD tidak dapat menambahkan atau mengubah akun Administrator.");
+        }
 
-      const currentRoles: AppRole[] =
-        (roleRows ?? []).map(
-          (row: any) =>
-            row.role as AppRole
-        );
-
-
-      let currentRole: AppRole = "user";
-
-
-      if (
-        currentRoles.includes("admin")
-      ) {
-        currentRole = "admin";
-
-      } else if (
-        currentRoles.includes("recruiter")
-      ) {
-        currentRole = "recruiter";
-      }
-
-
-      // HR tidak boleh menyentuh existing admin
-      if (
-        isRecruiter &&
-        !isAdmin &&
-        currentRole === "admin"
-      ) {
-        throw new Error(
-          "HRD tidak dapat menambahkan atau mengubah akun Administrator."
-        );
-      }
-
-
-      // ========================================================
-      // UPDATE PROFILE
-      // ========================================================
-
-      const {
-        error: updateProfileError,
-      } =
-        await db
+        const { error: updateProfileError } = await db
           .from("profiles")
           .update({
-            full_name:
-              addForm.full_name.trim(),
-
-            department:
-              addForm.department,
-
-            access_disabled:
-              false,
+            full_name: addForm.full_name.trim(),
+            department: addForm.department,
+            access_disabled: false,
           })
-          .eq(
-            "user_id",
-            profile.user_id
-          );
+          .eq("user_id", profile.user_id);
 
+        if (updateProfileError) throw updateProfileError;
 
-      if (updateProfileError) {
-        throw updateProfileError;
-      }
-
-
-      // ========================================================
-      // UPDATE ROLE
-      // ========================================================
-
-      if (
-        currentRole !==
-        addForm.role
-      ) {
-        if (
-          currentRoles.length === 0
-        ) {
-          const {
-            error: insertRoleError,
-          } =
-            await db
+        if (currentRole !== addForm.role) {
+          if (currentRoles.length === 0) {
+            const { error: insertRoleError } = await db
               .from("user_roles")
               .insert({
-                user_id:
-                  profile.user_id,
-
-                role:
-                  addForm.role,
+                user_id: profile.user_id,
+                role: addForm.role,
               });
-
-
-          if (insertRoleError) {
-            throw insertRoleError;
-          }
-
-        } else {
-          const {
-            error: updateRoleError,
-          } =
-            await db
+            if (insertRoleError) throw insertRoleError;
+          } else {
+            const { error: updateRoleError } = await db
               .from("user_roles")
-              .update({
-                role:
-                  addForm.role,
-              })
-              .eq(
-                "user_id",
-                profile.user_id
-              )
-              .eq(
-                "role",
-                currentRole
-              );
-
-
-          if (updateRoleError) {
-            throw updateRoleError;
+              .update({ role: addForm.role })
+              .eq("user_id", profile.user_id)
+              .eq("role", currentRole);
+            if (updateRoleError) throw updateRoleError;
           }
+        }
+
+        toast.success(`${addForm.full_name} berhasil ditambahkan/diperbarui di Access Control.`);
+        setAddOpen(false);
+        setAddForm({
+          full_name: "",
+          email: "",
+          password: "",
+          department: "",
+          role: "user",
+        });
+        await fetchUsers();
+        return;
+      }
+
+      // 3. Jika User BELUM ada di profiles -> Panggil Edge Function atau Server Endpoint untuk buat akun baru di Supabase Auth
+      if (!addForm.password || addForm.password.length < 6) {
+        throw new Error("Password minimal 6 karakter wajib diisi untuk pendaftaran akun baru.");
+      }
+
+      // Try Edge Function first
+      try {
+        const { data: edgeData, error: edgeError } = await supabase.functions.invoke("create-user", {
+          body: {
+            email: normalizedEmail,
+            password: addForm.password,
+            full_name: addForm.full_name.trim(),
+            department: addForm.department,
+            role: addForm.role,
+          },
+        });
+
+        if (!edgeError && edgeData?.success) {
+          toast.success(`${addForm.full_name} berhasil dibuat dan ditambahkan ke Access Control.`);
+          setAddOpen(false);
+          setAddForm({
+            full_name: "",
+            email: "",
+            password: "",
+            department: "",
+            role: "user",
+          });
+          await fetchUsers();
+          return;
+        }
+      } catch (e) {
+        // Edge Function not deployed, try local Express backend server
+      }
+
+      // Fallback to Express backend server (http://localhost:3001/api/admin/create-user)
+      try {
+        const res = await fetch("http://localhost:3001/api/admin/create-user", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: normalizedEmail,
+            password: addForm.password,
+            full_name: addForm.full_name.trim(),
+            department: addForm.department,
+            role: addForm.role,
+          }),
+        });
+
+        const contentType = res.headers.get("content-type") || "";
+        let resData: any = {};
+
+        if (contentType.includes("application/json")) {
+          resData = await res.json();
+        } else {
+          const rawText = await res.text();
+          console.warn("Backend server returned non-JSON response:", rawText);
+          throw new Error("Server backend belum aktif atau URL endpoint salah.");
+        }
+
+        if (res.ok && resData.success) {
+          toast.success(`${addForm.full_name} berhasil dibuat di Supabase Auth & ditambahkan ke Access Control.`);
+          setAddOpen(false);
+          setAddForm({
+            full_name: "",
+            email: "",
+            password: "",
+            department: "",
+            role: "user",
+          });
+          await fetchUsers();
+          return;
+        }
+
+        if (resData?.error) {
+          throw new Error(resData.error);
+        }
+      } catch (serverErr: any) {
+        if (serverErr.message && !serverErr.message.includes("Failed to fetch")) {
+          throw serverErr;
         }
       }
 
-
-      toast.success(
-        `${addForm.full_name} berhasil ditambahkan ke Access Control.`
-      );
-
-
-      setAddOpen(false);
-
-      setAddForm({
-        full_name: "",
-        email: "",
-        department: "",
-        role: "user",
-      });
-
-
-      await fetchUsers();
-
+      throw new Error("Gagal membuat akun baru. Pastikan Service Role Key server aktif atau deploy Edge Function create-user.");
     } catch (error: any) {
-      console.error(
-        "Add user error:",
-        error
-      );
-
-      toast.error(
-        error?.message ||
-        "Gagal menambahkan user."
-      );
-
+      console.error("Add user error:", error);
+      toast.error(error?.message || "Gagal menambahkan user.");
     } finally {
       setAddingUser(false);
     }
@@ -1881,14 +1818,30 @@ export default function AccessControl() {
                 placeholder="user@haka.com"
                 className="mt-1"
               />
+            </div>
 
+            <div>
+              <Label>
+                Password
+              </Label>
+
+              <Input
+                type="password"
+                value={addForm.password}
+                onChange={(event) =>
+                  setAddForm((prev) => ({
+                    ...prev,
+                    password:
+                      event.target.value,
+                  }))
+                }
+                placeholder="Minimal 6 karakter"
+                className="mt-1"
+              />
 
               <p className="text-xs text-slate-400 mt-1">
-
-                Email harus sudah terdaftar di sistem.
-
+                Wajib untuk pendaftaran akun baru di Supabase.
               </p>
-
             </div>
 
 
