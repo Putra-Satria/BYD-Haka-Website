@@ -234,64 +234,56 @@ export default function Auth() {
   };
 
   useEffect(() => {
-    const handleAuthCheck = async () => {
+    // 1. Initial Session Check on Mount
+    const checkActiveSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      const search = window.location.search || "";
-      const hash = window.location.hash || "";
-
-      const isRedirectFromEmail = search.includes("2fa_verified") || search.includes("type=signup") || hash.includes("access_token") || search.includes("code=");
       const is2FAPending = sessionStorage.getItem("haka_2fa_pending") === "true";
-      const isNewUserRegistration = sessionStorage.getItem("haka_new_user_reg") === "true";
 
       if (session?.user) {
-        // 1. Newly Registered User (clicked email confirmation link)
-        if (isNewUserRegistration || search.includes("type=signup")) {
-          sessionStorage.removeItem("haka_new_user_reg");
-          sessionStorage.removeItem("haka_2fa_pending");
-          toast.success("Account & email verified successfully! Welcome to HAKA Auto!");
-          await checkUserRole(session.user.id);
-          return;
-        }
-
-        // 2. Existing User logging in (2FA pending, hasn't clicked email link yet)
-        if (is2FAPending && !isRedirectFromEmail) {
+        // If 2FA is currently pending and user hasn't completed email link click yet
+        if (is2FAPending) {
           setIs2FASent(true);
           setEmail(session.user.email || "");
           return;
         }
 
-        // 3. User clicked 2FA email link or no 2FA pending
-        sessionStorage.removeItem("haka_2fa_pending");
+        // If user is authenticated and 2FA is not pending, go straight to dashboard
         await checkUserRole(session.user.id);
       }
     };
 
-    handleAuthCheck();
+    checkActiveSession();
 
+    // 2. Auth State Event Listener (Fires when user clicks email link)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      const search = window.location.search || "";
-      const hash = window.location.hash || "";
-      const isRedirectFromEmail = search.includes("2fa_verified") || search.includes("type=signup") || hash.includes("access_token") || search.includes("code=");
-      const is2FAPending = sessionStorage.getItem("haka_2fa_pending") === "true";
-      const isNewUserRegistration = sessionStorage.getItem("haka_new_user_reg") === "true";
-
       if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")) {
-        if (isNewUserRegistration || search.includes("type=signup")) {
+        const is2FAPending = sessionStorage.getItem("haka_2fa_pending") === "true";
+        const isNewUserRegistration = sessionStorage.getItem("haka_new_user_reg") === "true";
+
+        // Case A: Newly registered user clicking email confirmation link
+        if (isNewUserRegistration) {
           sessionStorage.removeItem("haka_new_user_reg");
           sessionStorage.removeItem("haka_2fa_pending");
+          setIs2FASent(false);
           toast.success("Account & email verified successfully! Welcome to HAKA Auto!");
           await checkUserRole(session.user.id);
           return;
         }
 
-        if (is2FAPending && !isRedirectFromEmail) {
-          setIs2FASent(true);
-          setEmail(session.user.email || "");
+        // Case B: Existing user clicking 2FA email magic link
+        if (is2FAPending && event === "SIGNED_IN") {
+          sessionStorage.removeItem("haka_2fa_pending");
+          setIs2FASent(false);
+          toast.success("2-Step security verification completed! Welcome back.");
+          await checkUserRole(session.user.id);
           return;
         }
 
-        sessionStorage.removeItem("haka_2fa_pending");
-        await checkUserRole(session.user.id);
+        // Case C: Standard authenticated user
+        if (!is2FAPending) {
+          setIs2FASent(false);
+          await checkUserRole(session.user.id);
+        }
       }
     });
 
