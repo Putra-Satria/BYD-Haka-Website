@@ -275,10 +275,17 @@ export default function Auth() {
         },
       });
 
-      if (otpError) throw otpError;
-
-      setIs2FASent(true);
-      toast.success("Password verified! Security verification link sent to your email.");
+      if (otpError) {
+        if (otpError.message.toLowerCase().includes("rate limit")) {
+          setIs2FASent(true);
+          toast.warning("Supabase email rate limit reached. Please check your email inbox for the link or wait 1 minute.");
+        } else {
+          throw otpError;
+        }
+      } else {
+        setIs2FASent(true);
+        toast.success("Password verified! Security verification link sent to your email.");
+      }
     } catch (error: any) {
       console.error("Login Check Error:", error);
       if (error instanceof z.ZodError) {
@@ -288,6 +295,8 @@ export default function Auth() {
           toast.error("Please verify your email address before logging in.");
         } else if (error.message.includes("Invalid login credentials")) {
           toast.error("Invalid email or password.");
+        } else if (error.message.toLowerCase().includes("rate limit")) {
+          toast.error("Supabase Email Rate Limit Exceeded. Please wait 1 minute before requesting a new link.");
         } else {
           toast.error(error.message || "An error occurred during login");
         }
