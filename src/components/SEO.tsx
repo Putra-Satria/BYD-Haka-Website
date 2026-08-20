@@ -17,9 +17,9 @@ export default function SEO({
     type = "website",
     image = "https://lovable.dev/opengraph-image-p98pqg.png" // Replace with actual career image if available
 }: SEOProps) {
-    const siteTitle = "BYD Haka Auto Career - Lowongan Kerja Otomotif Indonesia";
-    const defaultDesc = "Bergabunglah dengan BYD Haka Auto. Temukan lowongan kerja terbaru untuk sales, mekanik, manajer di seluruh dealer BYD Indonesia. Karir otomotif masa depan.";
-    const defaultKeywords = "lowongan kerja BYD, karir BYD Haka Auto, rekrutmen otomotif Indonesia, sales mobil listrik, teknisi mobil listrik, karir management trainee";
+    const siteTitle = "BYD Haka Auto Careers - Automotive Jobs in Indonesia";
+    const defaultDesc = "Join BYD Haka Auto. Discover the latest job openings for sales, mechanics, and managers across BYD dealerships in Indonesia. The future of automotive careers.";
+    const defaultKeywords = "BYD job openings, BYD Haka Auto careers, Indonesia automotive recruitment, electric vehicle sales, EV technicians, management trainee careers";
 
     return (
         <Helmet>

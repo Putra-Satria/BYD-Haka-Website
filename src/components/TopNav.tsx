@@ -16,6 +16,7 @@ export default function TopNav({ isPublic = false }: TopNavProps) {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isRecruiter, setIsRecruiter] = useState(false);
   const [isOnboardingEligible, setIsOnboardingEligible] = useState(false);
 
   useEffect(() => {
@@ -29,7 +30,11 @@ export default function TopNav({ isPublic = false }: TopNavProps) {
           .eq("user_id", session.user.id);
 
         const roles = roleRows?.map((item) => item.role) || [];
-        setIsAdmin(roles.includes("admin"));
+        const hasAdmin = roles.includes("admin");
+        const hasRecruiter = roles.includes("recruiter");
+
+        setIsAdmin(hasAdmin);
+        setIsRecruiter(hasRecruiter);
 
         // Check Onboarding Eligibility (accepted, offering, onboarding)
         const { data: appData } = await supabase
@@ -62,19 +67,29 @@ export default function TopNav({ isPublic = false }: TopNavProps) {
     { to: "/kontak-kami", label: "Contact" },
   ];
 
+  const isStaff = isAdmin || isRecruiter;
+
   const authNavItems = [
     ...(isAdmin
       ? [
         { to: "/admin", label: "Admin Dashboard" },
         { to: "/admin/talent-pool", label: "Talent Pool" },
         { to: "/admin/fixed-employees", label: "Fixed Employees" },
+        { to: "/admin/access-control", label: "Access Control" },
         { to: "/security-monitoring", label: "Security Monitoring" },
         { to: "/admin/security-audit", label: "Security Audit" },
       ]
+      : isRecruiter
+      ? [
+        { to: "/admin", label: "HRD Dashboard" },
+        { to: "/admin/talent-pool", label: "Talent Pool" },
+        { to: "/admin/fixed-employees", label: "Fixed Employees" },
+        { to: "/admin/access-control", label: "Access Control" },
+      ]
       : []),
     { to: "/job-board", label: "Job Board" },
-    ...(!isAdmin ? [{ to: "/saved-jobs", label: "Saved Jobs" }] : []),
-    ...(!isAdmin ? [{ to: "/applications", label: "Applications" }] : []),
+    ...(!isStaff ? [{ to: "/saved-jobs", label: "Saved Jobs" }] : []),
+    ...(!isStaff ? [{ to: "/applications", label: "Applications" }] : []),
     ...(isOnboardingEligible ? [{ to: "/onboarding", label: "Employee Onboarding" }] : []),
     { to: "/profile", label: "Profile" },
   ];

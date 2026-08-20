@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { maskNik } from "@/lib/securityHardening";
+import { maskNik, resolveFileUrl } from "@/lib/securityHardening";
 import { useAdminCheck } from "@/hooks/useAdminCheck";
 import TopNav from "@/components/TopNav";
 import {
@@ -47,7 +47,7 @@ interface ApplicationWithProfile {
 }
 
 export default function FixedEmployees() {
-    const { isAdmin, loading: authLoading } = useAdminCheck();
+    const { isStaff, loading: authLoading } = useAdminCheck();
     const [applications, setApplications] = useState<ApplicationWithProfile[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
@@ -60,10 +60,10 @@ export default function FixedEmployees() {
     const [selectedAppForOnboarding, setSelectedAppForOnboarding] = useState<ApplicationWithProfile | null>(null);
 
     useEffect(() => {
-        if (isAdmin) {
+        if (isStaff) {
             fetchFixedEmployees();
         }
-    }, [isAdmin]);
+    }, [isStaff]);
 
     const fetchFixedEmployees = async () => {
         setLoading(true);
@@ -293,7 +293,7 @@ export default function FixedEmployees() {
                                                 key={key}
                                                 variant="outline"
                                                 className="w-full justify-start overflow-hidden"
-                                                onClick={() => window.open(onboardingData[key], '_blank')}
+                                                onClick={() => window.open(resolveFileUrl(onboardingData[key], 'documents'), '_blank')}
                                             >
                                                 <FileText className="mr-2 h-4 w-4" />
                                                 {key.replace('_url', '').toUpperCase().replace(/_/g, ' ')}

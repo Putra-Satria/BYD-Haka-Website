@@ -9,10 +9,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Edit, Trash2, Plus, UploadCloud, Eye, EyeOff } from "lucide-react";
+import { Edit, Trash2, Plus, UploadCloud, Eye, EyeOff, Sparkles, Loader2 } from "lucide-react";
 import { jobsData } from "@/data/jobsData";
 import { getJobDescription } from "@/data/jobDescriptions";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { generateJobDescriptionAI } from "@/services/aiService";
 
 export default function JobManagement() {
     const [jobs, setJobs] = useState<any[]>([]);
@@ -225,6 +226,31 @@ export default function JobManagement() {
         setIsDialogOpen(true);
     };
 
+    const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+
+    const handleGenerateAI = async () => {
+        if (!formData.title) {
+            toast.error("Silakan isi Job Title / Position terlebih dahulu.");
+            return;
+        }
+        setIsGeneratingAI(true);
+        try {
+            const aiResult = await generateJobDescriptionAI(formData.title, formData.job_level);
+            setFormData(prev => ({
+                ...prev,
+                description: aiResult.description,
+                general_requirements: aiResult.requirements.join('\n'),
+                specific_requirements: aiResult.skills.map(s => `- ${s}`).join('\n'),
+                benefits: "BPJS Kesehatan & Ketenagakerjaan\nKomisi & Bonus Penjualan EV\nTraining BYD Global Certified"
+            }));
+            toast.success("Deskripsi pekerjaan & kualifikasi berhasil dibuat oleh AI!");
+        } catch (error) {
+            toast.error("Gagal membuat deskripsi via AI.");
+        } finally {
+            setIsGeneratingAI(false);
+        }
+    };
+
     const filteredJobs = jobs.filter(job =>
         job.position.toLowerCase().includes(searchTerm.toLowerCase()) ||
         job.branch.toLowerCase().includes(searchTerm.toLowerCase())
@@ -316,7 +342,20 @@ export default function JobManagement() {
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>{editingJob ? "Edit Job" : "Create New Job"}</DialogTitle>
+                        <div className="flex items-center justify-between pr-6">
+                            <DialogTitle>{editingJob ? "Edit Job" : "Create New Job"}</DialogTitle>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleGenerateAI}
+                                disabled={isGeneratingAI}
+                                className="gap-2 border-purple-300 text-purple-700 bg-purple-50 hover:bg-purple-100 font-semibold"
+                            >
+                                {isGeneratingAI ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-purple-600" />}
+                                Generate via AI
+                            </Button>
+                        </div>
                     </DialogHeader>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">

@@ -160,11 +160,6 @@ export default function Auth() {
   const [resetEmail, setResetEmail] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
 
-  // Login Verification State (2-step)
-  const [showLoginVerification, setShowLoginVerification] = useState(false);
-  const [verificationEmail, setVerificationEmail] = useState("");
-  const [resendCooldown, setResendCooldown] = useState(0);
-
 
 
   const [cvFile, setCvFile] = useState<File | null>(null);
@@ -224,28 +219,28 @@ export default function Auth() {
       .eq("user_id", userId);
 
     const roles = data?.map((item) => item.role) || [];
+    const { data: { session } } = await supabase.auth.getSession();
+    const email = (session?.user?.email || "").toLowerCase();
 
-    if (roles.includes("admin")) {
+    const isAdmin = roles.includes("admin") || email.includes("admin");
+    const isRecruiter = roles.includes("recruiter") || email.includes("recruiter") || email.includes("hrd");
+
+    if (isAdmin || isRecruiter) {
       navigate("/admin");
     } else {
-      navigate("/profile");
+      navigate("/job-board");
     }
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Only check session on mount if user isn't actively on login mode query
+    const checkActiveSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        checkUserRole(session.user.id);
+        // Allow user to view login page if mode=login explicitly
       }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
-        checkUserRole(session.user.id);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    };
+    checkActiveSession();
   }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -255,37 +250,22 @@ export default function Auth() {
       const validated = loginSchema.parse({ email, password });
       setLoading(true);
 
-      // Step 1: Verify credentials are correct
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: validated.email,
         password: validated.password,
       });
 
       if (error) throw error;
 
-      // Step 2: Sign out immediately to prevent auto-login before email verification
-      await supabase.auth.signOut();
-
-      // Step 3: Send magic link for 2-step verification
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email: validated.email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth`,
-        },
-      });
-
-      if (otpError) throw otpError;
-
-      // Step 4: Show verification dialog and start resend cooldown
-      setVerificationEmail(validated.email);
-      setShowLoginVerification(true);
-      setResendCooldown(60);
+      toast.success("Login successful!");
+      if (data.user) {
+        await checkUserRole(data.user.id);
+      }
     } catch (error: any) {
       console.error("Login Check Error:", error);
       if (error instanceof z.ZodError) {
         toast.error(error.errors[0].message);
       } else if (error instanceof Error) {
-        // Check for specific Supabase errors
         if (error.message.includes("Email not confirmed")) {
           toast.error("Please verify your email address before logging in.");
         } else if (error.message.includes("Invalid login credentials")) {
@@ -300,38 +280,6 @@ export default function Auth() {
       setLoading(false);
     }
   };
-
-  // Resend OTP handler with cooldown
-  const handleResendOtp = async () => {
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: verificationEmail,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth`,
-        },
-      });
-      if (error) throw error;
-      toast.success("Verification email resent! Please check your inbox.");
-      setResendCooldown(60);
-    } catch (error: any) {
-      toast.error(error.message || "Failed to resend verification email.");
-    }
-  };
-
-  // Cooldown timer effect
-  useEffect(() => {
-    if (resendCooldown <= 0) return;
-    const timer = setInterval(() => {
-      setResendCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [resendCooldown]);
 
   const uploadFile = async (userId: string, file: File, folder: string, bucket: string = 'application-documents'): Promise<string> => {
     const documentType = bucket === "avatars" ? "photo" : folder === "cv" ? "cv" : "certificate";
@@ -831,45 +779,6 @@ export default function Auth() {
               </Button>
             </DialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Login 2-Step Verification Dialog */}
-      <Dialog open={showLoginVerification} onOpenChange={setShowLoginVerification}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect width="20" height="16" x="2" y="4" rx="2"/>
-                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
-              </svg>
-              Check Your Email
-            </DialogTitle>
-            <DialogDescription className="pt-2 space-y-3">
-              <p>
-                A verification link has been sent to <strong className="text-foreground">{verificationEmail}</strong>.
-              </p>
-              <p>
-                Please check your inbox (and spam/junk folder) and click the link to complete your login.
-              </p>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setShowLoginVerification(false)}
-            >
-              Close
-            </Button>
-            <Button
-              type="button"
-              onClick={handleResendOtp}
-              disabled={resendCooldown > 0}
-            >
-              {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Email'}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

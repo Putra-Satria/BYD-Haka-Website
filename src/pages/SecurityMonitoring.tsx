@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import TopNav from "@/components/TopNav";
-import { useAdminCheck } from "@/hooks/useAdminCheck";
+import { useRoleCheck } from "@/hooks/useRoleCheck";
 import { getWazuhAlerts, checkWazuhHealth, WazuhAlert, WazuhHealth } from "@/services/wazuhAlertService";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Cell } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, RefreshCw, ShieldAlert, Server, Activity, Globe, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, RefreshCw, ShieldAlert, Server, Activity, Globe, Wifi, WifiOff, FileText, FileSpreadsheet } from "lucide-react";
+import { generateSecurityReportPDF, exportSecurityReportExcel } from "@/lib/reportGenerator";
 
 function formatTime(value: string) {
   if (!value || value === "-") return "-";
@@ -33,7 +34,10 @@ function severityBadgeClass(severity: number | string) {
 }
 
 export default function SecurityMonitoring() {
-  const { loading: roleLoading } = useAdminCheck();
+  const { loading: roleLoading } = useRoleCheck({
+    allowedRoles: ["admin"],
+    deniedToastMessage: "Akses ditolak: Halaman Security Monitoring khusus untuk Super Admin."
+  });
   const [alerts, setAlerts] = useState<WazuhAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>("");
@@ -55,7 +59,7 @@ export default function SecurityMonitoring() {
       if (health) setHealthStatus(health);
       setLastUpdated(new Date().toLocaleString("id-ID"));
     } catch (error) {
-      console.error("Failed to fetch Wazuh alerts:", error);
+      console.error("Gagal mengambil alert Wazuh:", error);
     } finally {
       setLoading(false);
     }
@@ -157,15 +161,51 @@ export default function SecurityMonitoring() {
               Security Monitoring
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Special admin page to monitor Suricata IDS alerts that have been sent and processed by Wazuh.
+              Dedicated admin dashboard for monitoring Suricata IDS alerts processed by Wazuh.
             </p>
           </div>
 
           <div className="flex flex-col items-start gap-2 md:items-end">
-            <Button onClick={fetchAlerts} disabled={loading} className="gap-2">
-              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-              Refresh Alert
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => generateSecurityReportPDF({
+                  auditLogs: [],
+                  wazuhAlerts: alerts,
+                  stats: {
+                    totalLogs: alerts.length,
+                    documentAccessCount: 0,
+                    blockedCount: 0,
+                    highSeverityAlerts: stats.highSeverity
+                  }
+                })}
+                className="gap-2 border-primary text-primary hover:bg-primary/10"
+              >
+                <FileText className="h-4 w-4" />
+                Generate PDF Report
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => exportSecurityReportExcel({
+                  auditLogs: [],
+                  wazuhAlerts: alerts,
+                  stats: {
+                    totalLogs: alerts.length,
+                    documentAccessCount: 0,
+                    blockedCount: 0,
+                    highSeverityAlerts: stats.highSeverity
+                  }
+                })}
+                className="gap-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Export Excel
+              </Button>
+              <Button onClick={fetchAlerts} disabled={loading} className="gap-2">
+                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
             <p className="text-xs text-slate-500">
               {lastUpdated ? `Last updated: ${lastUpdated}` : "Click Refresh to load data"}
             </p>
@@ -180,7 +220,7 @@ export default function SecurityMonitoring() {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-slate-900">{stats.totalAlerts}</div>
-              <p className="text-xs text-slate-500 mt-1">Latest alerts from Wazuh</p>
+              <p className="text-xs text-slate-500 mt-1">Alert terbaru dari Wazuh</p>
             </CardContent>
           </Card>
 
@@ -191,7 +231,7 @@ export default function SecurityMonitoring() {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-orange-600">{stats.highSeverity}</div>
-              <p className="text-xs text-slate-500 mt-1">Severity 3 and above</p>
+              <p className="text-xs text-slate-500 mt-1">Severity 3 ke atas</p>
             </CardContent>
           </Card>
 
@@ -202,7 +242,7 @@ export default function SecurityMonitoring() {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-slate-900">{stats.uniqueSources}</div>
-              <p className="text-xs text-slate-500 mt-1">Number of unique source IPs</p>
+              <p className="text-xs text-slate-500 mt-1">Jumlah IP sumber unik</p>
             </CardContent>
           </Card>
 
@@ -215,7 +255,7 @@ export default function SecurityMonitoring() {
               <div className="line-clamp-2 text-sm font-semibold text-slate-900">
                 {stats.latestSignature}
               </div>
-              <p className="text-xs text-slate-500 mt-2">Latest alert signature</p>
+              <p className="text-xs text-slate-500 mt-2">Signature alert terakhir</p>
             </CardContent>
           </Card>
         </div>
@@ -308,7 +348,7 @@ export default function SecurityMonitoring() {
               <div>
                 <CardTitle className="text-xl text-slate-900">Wazuh Security Alerts</CardTitle>
                 <p className="text-sm text-slate-500 mt-1">
-                  Data fetched from internal API that reads Wazuh alerts.
+                  Data diambil dari API internal yang membaca alert Wazuh.
                 </p>
               </div>
               <Badge variant="outline" className="w-fit">
@@ -326,7 +366,7 @@ export default function SecurityMonitoring() {
               </div>
             ) : alerts.length === 0 ? (
               <div className="p-8 text-center text-slate-500">
-                No Suricata alerts found from Wazuh yet.
+                Belum ada alert Suricata yang ditemukan dari Wazuh.
               </div>
             ) : (
               <div className="overflow-x-auto">

@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Download, ExternalLink, X, FileText, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
+import { resolveFileUrl } from "@/lib/securityHardening";
+
 interface PDFPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -14,17 +16,17 @@ interface PDFPreviewModalProps {
 export function PDFPreviewModal({ isOpen, onClose, fileUrl, title }: PDFPreviewModalProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  // No need for signed URL logic since buckets are public
-  // We will pass the full public URL from the parent component
+  const resolvedUrl = resolveFileUrl(fileUrl, 'application-documents');
+
   useEffect(() => {
-    if (isOpen && fileUrl) {
+    if (isOpen && resolvedUrl) {
       setLoading(false);
     }
-  }, [isOpen, fileUrl]);
+  }, [isOpen, resolvedUrl]);
 
   const handleDownload = () => {
-    if (fileUrl) {
-      window.open(fileUrl, "_blank");
+    if (resolvedUrl) {
+      window.open(resolvedUrl, "_blank");
     }
   };
 
@@ -37,13 +39,13 @@ export function PDFPreviewModal({ isOpen, onClose, fileUrl, title }: PDFPreviewM
             {title}
           </DialogTitle>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleDownload} disabled={!fileUrl}>
+            <Button variant="outline" size="sm" onClick={handleDownload} disabled={!resolvedUrl}>
               <Download className="w-4 h-4 mr-2" />
               Download
             </Button>
-            {fileUrl && (
+            {resolvedUrl && (
               <Button variant="outline" size="sm" asChild>
-                <a href={fileUrl} target="_blank" rel="noopener noreferrer">
+                <a href={resolvedUrl} target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="w-4 h-4 mr-2" />
                   Open in New Tab
                 </a>
@@ -68,9 +70,9 @@ export function PDFPreviewModal({ isOpen, onClose, fileUrl, title }: PDFPreviewM
                 Download File
               </Button>
             </div>
-          ) : fileUrl ? (
+          ) : resolvedUrl ? (
             <iframe
-              src={`${fileUrl}#toolbar=0`}
+              src={`${resolvedUrl}#toolbar=0`}
               className="w-full h-full border-0"
               title={title}
               onLoad={() => setLoading(false)}

@@ -45,7 +45,7 @@ const NotFound = () => {
           </div>
 
           <h1 className="text-4xl md:text-6xl font-extrabold text-gray-900 tracking-tight">
-            Oops! Dead Ernd.
+            Oops! Dead End.
           </h1>
 
           <p className="text-lg md:text-xl text-gray-600 leading-relaxed">

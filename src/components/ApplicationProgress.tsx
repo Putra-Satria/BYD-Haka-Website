@@ -248,19 +248,19 @@ export function ApplicationProgress({ currentStatus, className, createdDate, log
                         <DialogTitle>Application Status Update</DialogTitle>
                       </DialogHeader>
                       <div className="space-y-4 text-sm leading-relaxed text-muted-foreground pt-2">
-                        <p>Selamat siang pak/bu,</p>
+                        <p>Dear applicant,</p>
                         <p>
-                          Kami mengucapkan terima kasih sudah mengikuti proses seleksi, meluangkan waktu untuk sharing latar belakang dan pengalaman di perusahaan kami.
+                          Thank you for participating in our selection process and taking the time to share your background and experience with our company.
                         </p>
                         <p>
-                          Setelah melalui evaluasi menyeluruh, dengan ini kami sampaikan bahwa bapak/ibu belum lolos ke tahap berikutnya.
+                          After a thorough evaluation, we regret to inform you that you have not been selected to move forward to the next stage.
                         </p>
                         <p>
-                          Kami menghargai rangkaian proses yang sudah bapak/ibu jalani, dan semoga diberikan kemudahan serta kesehatan selalu.
+                          We truly appreciate your effort throughout this process, and we wish you all the best and good health in your future endeavors.
                         </p>
                         <p className="font-semibold text-foreground pt-2">
-                          Salam hangat,<br />
-                          Tim Talent Acquisition Haka Auto
+                          Warm regards,<br />
+                          Haka Auto Talent Acquisition Team
                         </p>
                       </div>
                     </DialogContent>

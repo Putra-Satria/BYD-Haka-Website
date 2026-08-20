@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { maskNik } from "@/lib/securityHardening";
@@ -70,7 +69,7 @@ interface ApplicationWithProfile {
 }
 
 export default function TalentPool() {
-    const { isAdmin, loading: authLoading } = useAdminCheck();
+    const { isStaff, loading: authLoading } = useAdminCheck();
     const [applications, setApplications] = useState<ApplicationWithProfile[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
@@ -103,10 +102,10 @@ export default function TalentPool() {
     ];
 
     useEffect(() => {
-        if (isAdmin) {
+        if (isStaff) {
             fetchRejectedApplications();
         }
-    }, [isAdmin]);
+    }, [isStaff]);
 
     const fetchRejectedApplications = async () => {
         setLoading(true);

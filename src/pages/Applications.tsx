@@ -166,7 +166,7 @@ export default function Applications() {
       .select("*")
       .eq("user_id", session.user.id)
       .eq("is_read", false)
-      .eq("title", "Update Status Lamaran") // Only show our specific status updates
+      .eq("title", "Application Status Update") // Only show our specific status updates
       .order("created_at", { ascending: false })
       .limit(1);
 

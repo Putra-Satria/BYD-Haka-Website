@@ -1,6 +1,6 @@
 import { format } from "date-fns";
 import { createPortal } from "react-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { resolveFileUrl } from "@/lib/securityHardening";
 import { Users } from "lucide-react";
 
 interface PrintableOnboardingDataProps {
@@ -13,7 +13,7 @@ export const PrintableOnboardingData = ({ data, app }: PrintableOnboardingDataPr
 
     const profile = app.profiles || {};
     const avatarUrl = profile.avatar_url
-        ? supabase.storage.from('avatars').getPublicUrl(profile.avatar_url).data.publicUrl
+        ? resolveFileUrl(profile.avatar_url, 'avatars')
         : null;
 
     return createPortal(

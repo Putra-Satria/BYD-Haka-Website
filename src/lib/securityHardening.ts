@@ -7,7 +7,12 @@ export type SecurityAuditAction =
   | "EXPORT_APPLICATIONS"
   | "UPLOAD_DOCUMENT"
   | "SECURITY_MONITORING_VIEW"
-  | "BLOCKED_ACCESS";
+  | "BLOCKED_ACCESS"
+  | "APPLICANT_UPDATE_PROFILE"
+  | "APPLICANT_SUBMIT_APPLICATION"
+  | "APPLICANT_UPDATE_EDUCATION"
+  | "APPLICANT_UPDATE_EXPERIENCE"
+  | "APPLICANT_SUBMIT_ONBOARDING";
 
 export type SecurityAuditStatus = "success" | "failed" | "blocked";
 
@@ -68,7 +73,7 @@ export function validateSecureUpload(file: File, type: SecureDocumentType = "doc
   if (!rule.allowedExt.includes(ext)) {
     return {
       valid: false,
-      message: `File format not allowed. Use: ${rule.allowedExt.join(", ")}.`,
+      message: `File format not allowed. Allowed formats: ${rule.allowedExt.join(", ")}.`,
     };
   }
 
@@ -93,20 +98,83 @@ export function buildSecureFilePath(userId: string, file: File, folder: string) 
   const ext = file.name.split(".").pop()?.toLowerCase() || "bin";
   const safeFolder = folder.replace(/[^a-zA-Z0-9-_]/g, "").toLowerCase();
 
-  // Original user filename is not used so NIK/personal name is not leaked from URL/storage path.
+  // Nama file asli user tidak dipakai agar NIK/nama pribadi tidak bocor dari URL/path storage.
   return `${userId}/${safeFolder}/${crypto.randomUUID()}.${ext}`;
 }
 
-export async function getSignedDocumentUrl(bucket: string, path: string, expiresInSeconds = 120) {
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .createSignedUrl(path, expiresInSeconds);
+export function resolveFileUrl(path: string | null | undefined, defaultBucket: string = 'application-documents'): string {
+  if (!path) return "";
 
-  if (error) {
-    throw new Error(error.message);
+  // If already an absolute URL (http:// or https://), return as-is
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
   }
 
-  return data.signedUrl;
+  // Clean leading slashes
+  let cleanPath = path.replace(/^\/+/, "");
+  let bucket = defaultBucket;
+
+  // Detect bucket prefix if present at start of path
+  const knownBuckets = ["application-documents", "documents", "avatars"];
+  for (const b of knownBuckets) {
+    if (cleanPath.startsWith(`${b}/`)) {
+      bucket = b;
+      cleanPath = cleanPath.substring(b.length + 1);
+      break;
+    }
+  }
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://sjujcjvmjaqqstpdldsj.supabase.co";
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${cleanPath}`;
+}
+
+export async function getSignedDocumentUrl(bucket: string, path: string, expiresInSeconds = 120): Promise<string> {
+  if (!path) return "";
+
+  let relativePath = path.replace(/^\/+/, "");
+  let targetBucket = bucket;
+
+  // If path is a full http/https URL, check if it's a Supabase storage URL and extract object path
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    const publicMarker = `/storage/v1/object/public/`;
+    const signMarker = `/storage/v1/object/sign/`;
+
+    if (path.includes(publicMarker)) {
+      const afterPublic = path.substring(path.indexOf(publicMarker) + publicMarker.length);
+      const parts = afterPublic.split("/");
+      targetBucket = parts[0];
+      relativePath = parts.slice(1).join("/");
+    } else if (path.includes(signMarker)) {
+      const afterSign = path.substring(path.indexOf(signMarker) + signMarker.length);
+      const parts = afterSign.split("/");
+      targetBucket = parts[0];
+      relativePath = parts.slice(1).join("/");
+    } else {
+      return path;
+    }
+  }
+
+  // Strip bucket prefix if present
+  if (relativePath.startsWith(`${targetBucket}/`)) {
+    relativePath = relativePath.substring(targetBucket.length + 1);
+  }
+
+  // Strip query parameters and hashes if present
+  relativePath = relativePath.split("?")[0].split("#")[0];
+
+  try {
+    const { data, error } = await supabase.storage
+      .from(targetBucket)
+      .createSignedUrl(relativePath, expiresInSeconds);
+
+    if (error || !data?.signedUrl) {
+      return resolveFileUrl(path, targetBucket);
+    }
+
+    return data.signedUrl;
+  } catch {
+    return resolveFileUrl(path, targetBucket);
+  }
 }
 
 export async function logSecurityAudit(params: {
@@ -132,7 +200,7 @@ export async function logSecurityAudit(params: {
       user_agent: navigator.userAgent,
     });
   } catch (error) {
-    // Do not make the main flow fail just because the audit table hasn't been migrated.
-    console.warn("Security audit log is not active or failed to save:", error);
+    // Jangan membuat flow utama gagal hanya karena audit table belum dimigrasi.
+    console.warn("Security audit log belum aktif atau gagal disimpan:", error);
   }
 }

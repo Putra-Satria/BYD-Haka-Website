@@ -25,18 +25,18 @@ export const jobsData: Job[] = [
   { id: "9", position: "Administration Head", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
   { id: "10", position: "Admin Service", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
   { id: "11", position: "Admin Sales", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
-  { id: "12", position: "Admin Faktur", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
+  { id: "12", position: "Invoice Admin", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
   { id: "13", position: "Accounting", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
   { id: "14", position: "Cashier", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
   { id: "15", position: "Service Manager", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
   { id: "16", position: "Service Advisor", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
   { id: "17", position: "Partman", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
-  { id: "18", position: "Mekanik", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
+  { id: "18", position: "Mechanic", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
   { id: "19", position: "Customer Relation Officer", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
   { id: "20", position: "Marketing Specialist", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
-  { id: "21", position: "Personalia & General Affair", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
+  { id: "21", position: "HR & General Affairs", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
   { id: "22", position: "In House Trainer", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
-  { id: "23", position: "Pre Deliver Inspection", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
+  { id: "23", position: "Pre Delivery Inspection", branch: "Jakarta Area", location: "Jakarta", province: "DKI Jakarta", type: "Full Time", isOpen: true },
 
   // Malang
   { id: "24", position: "Sales Supervisor", branch: "BYD Haka Malang", location: "Malang", province: "Jawa Timur", type: "Full Time", isOpen: true },
@@ -49,23 +49,23 @@ export const jobsData: Job[] = [
   { id: "29", position: "Sales Supervisor", branch: "BYD Haka Karebosi", location: "Makassar", province: "Sulawesi Selatan", type: "Full Time", isOpen: true },
   { id: "30", position: "Sales Executive", branch: "BYD Haka Karebosi", location: "Makassar", province: "Sulawesi Selatan", type: "Full Time", isOpen: true },
   { id: "31", position: "Admin Sales", branch: "BYD Haka Karebosi", location: "Makassar", province: "Sulawesi Selatan", type: "Full Time", isOpen: true },
-  { id: "32", position: "Personalisasi & GA", branch: "BYD Haka Karebosi", location: "Makassar", province: "Sulawesi Selatan", type: "Full Time", isOpen: true },
-  { id: "33", position: "Pre Deliver Inspection", branch: "BYD Haka Karebosi", location: "Makassar", province: "Sulawesi Selatan", type: "Full Time", isOpen: true },
+  { id: "32", position: "HR & General Affairs", branch: "BYD Haka Karebosi", location: "Makassar", province: "Sulawesi Selatan", type: "Full Time", isOpen: true },
+  { id: "33", position: "Pre Delivery Inspection", branch: "BYD Haka Karebosi", location: "Makassar", province: "Sulawesi Selatan", type: "Full Time", isOpen: true },
 
   // Balikpapan
   { id: "34", position: "Sales Supervisor", branch: "BYD Haka Balikpapan", location: "Balikpapan", province: "Kalimantan Timur", type: "Full Time", isOpen: true },
   { id: "35", position: "Sales Executive", branch: "BYD Haka Balikpapan", location: "Balikpapan", province: "Kalimantan Timur", type: "Full Time", isOpen: true },
-  { id: "36", position: "Mekanik", branch: "BYD Haka Balikpapan", location: "Balikpapan", province: "Kalimantan Timur", type: "Full Time", isOpen: true },
+  { id: "36", position: "Mechanic", branch: "BYD Haka Balikpapan", location: "Balikpapan", province: "Kalimantan Timur", type: "Full Time", isOpen: true },
   { id: "37", position: "Service Advisor", branch: "BYD Haka Balikpapan", location: "Balikpapan", province: "Kalimantan Timur", type: "Full Time", isOpen: true },
   { id: "38", position: "Admin Service", branch: "BYD Haka Balikpapan", location: "Balikpapan", province: "Kalimantan Timur", type: "Full Time", isOpen: true },
   { id: "39", position: "Marketing Specialist", branch: "BYD Haka Balikpapan", location: "Balikpapan", province: "Kalimantan Timur", type: "Full Time", isOpen: true },
-  { id: "40", position: "Pre Deliver Inspection", branch: "BYD Haka Balikpapan", location: "Balikpapan", province: "Kalimantan Timur", type: "Full Time", isOpen: true },
+  { id: "40", position: "Pre Delivery Inspection", branch: "BYD Haka Balikpapan", location: "Balikpapan", province: "Kalimantan Timur", type: "Full Time", isOpen: true },
 
   // Cibubur
   { id: "41", position: "Marketing Specialist", branch: "BYD Haka Cibubur", location: "Cibubur", province: "Jawa Barat", type: "Full Time", isOpen: true },
   { id: "42", position: "Partman", branch: "BYD Haka Cibubur", location: "Cibubur", province: "Jawa Barat", type: "Full Time", isOpen: true },
-  { id: "43", position: "Mekanik", branch: "BYD Haka Cibubur", location: "Cibubur", province: "Jawa Barat", type: "Full Time", isOpen: true },
-  { id: "44", position: "Pre Deliver Inspection", branch: "BYD Haka Cibubur", location: "Cibubur", province: "Jawa Barat", type: "Full Time", isOpen: true },
+  { id: "43", position: "Mechanic", branch: "BYD Haka Cibubur", location: "Cibubur", province: "Jawa Barat", type: "Full Time", isOpen: true },
+  { id: "44", position: "Pre Delivery Inspection", branch: "BYD Haka Cibubur", location: "Cibubur", province: "Jawa Barat", type: "Full Time", isOpen: true },
 
   // New Branches
   { id: "45", position: "Branch Manager", branch: "BYD Haka Manado", location: "Manado", province: "Sulawesi Utara", type: "Full Time", isOpen: true },

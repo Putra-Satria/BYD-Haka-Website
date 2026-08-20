@@ -14,7 +14,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 import EducationSection from "@/components/profile/EducationSection";
 import ExperienceSection from "@/components/profile/ExperienceSection";
-import { buildSecureFilePath, logSecurityAudit, validateSecureUpload, getSignedDocumentUrl } from "@/lib/securityHardening";
+import { buildSecureFilePath, getSignedDocumentUrl, logSecurityAudit, resolveFileUrl, validateSecureUpload } from "@/lib/securityHardening";
 
 interface ProfileData {
     id: string;
@@ -47,6 +47,7 @@ export default function ProfilePage() {
     const [newCv, setNewCv] = useState<File | null>(null);
     const [newPaklaring, setNewPaklaring] = useState<File | null>(null);
     const [isAdmin, setIsAdmin] = useState(false);
+    const [isRecruiter, setIsRecruiter] = useState(false);
     const [activeSection, setActiveSection] = useState<string>("biodata");
     const [cacheBuster, setCacheBuster] = useState(Date.now());
     const [stats, setStats] = useState({ applicants: 0, jobs: 0, pending: 0 });
@@ -74,17 +75,21 @@ export default function ProfilePage() {
                 }
 
                 // Check Role
-                const { data: roleData } = await supabase
+                const { data: roleRows } = await supabase
                     .from("user_roles")
                     .select("role")
-                    .eq("user_id", user.id)
-                    .eq("role", "admin")
-                    .maybeSingle();
+                    .eq("user_id", user.id);
 
-                setIsAdmin(!!roleData);
+                const roles = roleRows?.map(r => r.role) || [];
+                const hasAdmin = roles.includes("admin");
+                const hasRecruiter = roles.includes("recruiter");
+                const hasStaff = hasAdmin || hasRecruiter;
 
-                if (!!roleData) {
-                    // Fetch Admin Stats
+                setIsAdmin(hasAdmin);
+                setIsRecruiter(hasRecruiter);
+
+                if (hasStaff) {
+                    // Fetch Staff Stats
                     const { count: applicantCount } = await supabase
                         .from('applications')
                         .select('*', { count: 'exact', head: true });
@@ -376,20 +381,27 @@ export default function ProfilePage() {
     };
     // ...
 
-    // HELPER TO GET STORAGE URL
     const getStorageUrl = (path: string | null, bucket: string = 'application-documents') => {
         if (!path) return "";
-        return `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}?t=${cacheBuster}`;
+        const url = resolveFileUrl(path, bucket);
+        return url.includes('?') ? `${url}&t=${cacheBuster}` : `${url}?t=${cacheBuster}`;
     };
 
-    const handleViewDocument = async (path: string | null) => {
+    const handleViewApplicantDocument = async (path: string | null, title: string, bucket: string = 'application-documents') => {
         if (!path) return;
         try {
-            const signedUrl = await getSignedDocumentUrl("application-documents", path, 120);
-            window.open(signedUrl, "_blank");
+            const url = await getSignedDocumentUrl(bucket, path, 300);
+            window.open(url, '_blank');
+            await logSecurityAudit({
+                action: "VIEW_DOCUMENT",
+                targetUserId: profile?.id || null,
+                documentPath: `${bucket}/${path}`,
+                status: "success",
+                description: `Applicant viewed their own ${title}.`,
+            });
         } catch (error) {
-            console.error("Failed to open document:", error);
-            toast.error("Failed to open document. You might not have access.");
+            console.error("Error viewing document:", error);
+            toast.error("Failed to open document");
         }
     };
 
@@ -490,8 +502,8 @@ export default function ProfilePage() {
 
                 {/* SIDEBAR */}
                 <div className="w-full lg:w-64 shrink-0 space-y-6">
-                    {/* Completion Status Card - HIDE FOR ADMIN */}
-                    {!isAdmin && (
+                    {/* Completion Status Card - HIDE FOR STAFF */}
+                    {!(isAdmin || isRecruiter) && (
                         <Card>
                             <CardContent className="p-4 space-y-2">
                                 <div className="flex justify-between text-sm">
@@ -518,8 +530,8 @@ export default function ProfilePage() {
                     {/* Navigation Menu */}
                     <Card className="overflow-hidden">
                         <div className="flex flex-col py-2">
-                            {isAdmin ? (
-                                <SidebarItem id="biodata" label="Admin Info" icon={UserCircle} active={true} />
+                            {(isAdmin || isRecruiter) ? (
+                                <SidebarItem id="biodata" label={isAdmin ? "Super Admin Info" : "HRD Recruiter Info"} icon={UserCircle} active={true} />
                             ) : (
                                 <>
                                     <SidebarItem
@@ -597,12 +609,12 @@ export default function ProfilePage() {
 
                 {/* MAIN CONTENT AREA */}
                 <div className="flex-1 min-w-0">
-                    {/* ADMIN VIEW */}
-                    {isAdmin ? (
+                    {/* STAFF VIEW (ADMIN / RECRUITER) */}
+                    {(isAdmin || isRecruiter) ? (
                         <div className="bg-white rounded-lg shadow h-fit">
                             <div className="p-6 border-b">
                                 <h1 className="text-2xl font-bold flex items-center gap-2">
-                                    Admin Profile
+                                    {isAdmin ? "Super Admin Profile" : "HRD Recruiter Profile"}
                                 </h1>
                             </div>
                             <div className="p-8">
@@ -618,10 +630,17 @@ export default function ProfilePage() {
                                             <h2 className="text-3xl font-bold text-gray-900">{profile?.full_name}</h2>
                                             <p className="text-gray-500 font-medium">{profile?.email}</p>
                                         </div>
-                                        <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg text-sm font-semibold border border-green-200">
-                                            <Shield className="w-4 h-4" />
-                                            Administrator Access
-                                        </div>
+                                        {isAdmin ? (
+                                            <div className="inline-flex items-center gap-2 px-4 py-2 bg-purple-50 text-purple-700 rounded-lg text-sm font-semibold border border-purple-200">
+                                                <Shield className="w-4 h-4" />
+                                                Super Admin Access
+                                            </div>
+                                        ) : (
+                                            <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-semibold border border-blue-200">
+                                                <Briefcase className="w-4 h-4" />
+                                                HRD / Recruiter Access
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
@@ -981,7 +1000,8 @@ export default function ProfilePage() {
                                                                     <p className="text-sm font-medium text-gray-900">Curriculum Vitae</p>
                                                                     {profile?.cv_url ? (
                                                                         <button
-                                                                            onClick={() => handleViewDocument(profile.cv_url)}
+                                                                            type="button"
+                                                                            onClick={() => handleViewApplicantDocument(profile.cv_url, 'Curriculum Vitae', 'application-documents')}
                                                                             className="text-xs text-green-600 hover:underline block truncate text-left"
                                                                         >
                                                                             View PDF
@@ -998,10 +1018,11 @@ export default function ProfilePage() {
                                                                     <FileText className="w-5 h-5" />
                                                                 </div>
                                                                 <div className="flex-1 min-w-0">
-                                                                    <p className="text-sm font-medium text-gray-900">Certificate / Diploma</p>
+                                                                    <p className="text-sm font-medium text-gray-900">Paklaring / Ijazah</p>
                                                                     {profile?.certificate_url ? (
                                                                         <button
-                                                                            onClick={() => handleViewDocument(profile.certificate_url)}
+                                                                            type="button"
+                                                                            onClick={() => handleViewApplicantDocument(profile.certificate_url, 'Paklaring / Ijazah', 'application-documents')}
                                                                             className="text-xs text-green-600 hover:underline block truncate text-left"
                                                                         >
                                                                             View PDF

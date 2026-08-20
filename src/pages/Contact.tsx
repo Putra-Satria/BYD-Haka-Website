@@ -52,7 +52,7 @@ export default function Contact() {
                 </div>
                 <div>
                   <h3 className="font-bold text-gray-900 text-lg">Visit Us</h3>
-                  <p className="text-gray-500 text-sm max-w-[250px] mx-auto">Cyber 2 Tower, Lantai 32, Jakarta Selatan</p>
+                  <p className="text-gray-500 text-sm max-w-[250px] mx-auto">Cyber 2 Tower, 32nd Floor, South Jakarta</p>
                 </div>
               </div>
             </div>

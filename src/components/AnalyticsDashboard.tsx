@@ -53,7 +53,7 @@ export function AnalyticsDashboard({ applications }: AnalyticsDashboardProps) {
             'Applied': 0,
             'HR Interview': 0,
             'User Interview': 0,
-            'Psikotes/Test': 0,
+            'Psychological Test': 0,
             'Offering': 0,
             'Accepted': 0
         };
@@ -68,7 +68,7 @@ export function AnalyticsDashboard({ applications }: AnalyticsDashboardProps) {
                 statusCounts['User Interview']++;
             }
             if (['psikotes', 'test_bidang', 'offering', 'accepted', 'onboarding'].includes(app.status)) {
-                statusCounts['Psikotes/Test']++;
+                statusCounts['Psychological Test']++;
             }
             if (['offering', 'accepted', 'onboarding'].includes(app.status)) {
                 statusCounts['Offering']++;

@@ -23,6 +23,7 @@ import TalentPool from "./pages/TalentPool";
 import FixedEmployees from "./pages/FixedEmployees";
 import SecurityMonitoring from "./pages/SecurityMonitoring";
 import SecurityAudit from "./pages/SecurityAudit";
+import AccessControl from "./pages/AccessControl";
 import { SessionTimeout } from "./components/SessionTimeout";
 
 const queryClient = new QueryClient();
@@ -51,6 +52,7 @@ const App = () => (
           <Route path="/admin/fixed-employees" element={<FixedEmployees />} />
           <Route path="/security-monitoring" element={<SecurityMonitoring />} />
           <Route path="/admin/security-audit" element={<SecurityAudit />} />
+          <Route path="/admin/access-control" element={<AccessControl />} />
           <Route path="/tentang-kami" element={<About />} />
           <Route path="/kontak-kami" element={<Contact />} />
           <Route path="/auth" element={<Auth />} />

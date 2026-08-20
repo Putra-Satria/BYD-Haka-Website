@@ -94,7 +94,7 @@ function normalizeAlert(item: any, index: number): WazuhAlert {
 export async function getWazuhAlerts(): Promise<WazuhAlert[]> {
   const apiUrl = import.meta.env.VITE_WAZUH_ALERT_API;
 
-  // If Wazuh API URL is not filled in .env.local, view still works using dummy.
+  // Kalau URL API Wazuh belum diisi di .env.local, tampilan tetap jalan pakai dummy.
   if (!apiUrl) {
     return DUMMY_ALERTS;
   }
@@ -115,7 +115,7 @@ export async function getWazuhAlerts(): Promise<WazuhAlert[]> {
 
     return rawAlerts.map(normalizeAlert);
   } catch (error) {
-    console.error("Failed to fetch Wazuh data, fallback to dummy:", error);
+    console.error("Gagal ambil data Wazuh, fallback ke dummy:", error);
     return DUMMY_ALERTS;
   }
 }
@@ -129,7 +129,7 @@ export async function getWazuhSummary(): Promise<WazuhSummary | null> {
     if (!response.ok) throw new Error(`API Wazuh summary error: ${response.status}`);
     return await response.json();
   } catch (error) {
-    console.error("Failed to fetch Wazuh summary:", error);
+    console.error("Gagal ambil summary Wazuh:", error);
     return null;
   }
 }
@@ -144,7 +144,7 @@ export async function checkWazuhHealth(): Promise<WazuhHealth | null> {
     if (!response.ok) throw new Error(`API Wazuh health error: ${response.status}`);
     return await response.json();
   } catch (error) {
-    console.error("Failed to check Wazuh health:", error);
+    console.error("Gagal cek health Wazuh:", error);
     return { status: "error", wazuhConnected: false, uptime: 0 };
   }
 }

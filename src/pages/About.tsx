@@ -167,15 +167,15 @@ export default function About() {
                 <ul className="space-y-4 text-gray-300">
                   <li className="flex items-start gap-3">
                     <div className="w-1.5 h-1.5 rounded-full bg-primary mt-2.5"></div>
-                    <p>Developing superior human resources, professional, effective, and efficient business processes, as well as good financial management.</p>
+                    <p>Develop superior human resources, professional, effective, and efficient business processes, as well as sound financial management.</p>
                   </li>
                   <li className="flex items-start gap-3">
                     <div className="w-1.5 h-1.5 rounded-full bg-primary mt-2.5"></div>
-                    <p>Providing the best, fast, and accurate service for customer needs.</p>
+                    <p>Provide the best, fast, and accurate service to meet customer needs.</p>
                   </li>
                   <li className="flex items-start gap-3">
                     <div className="w-1.5 h-1.5 rounded-full bg-primary mt-2.5"></div>
-                    <p>Actively participating in protecting and preserving the environment.</p>
+                    <p>Actively participate in protecting and preserving the environment.</p>
                   </li>
                 </ul>
               </div>
@@ -208,9 +208,9 @@ export default function About() {
                     rest: "EDICATION",
                     icon: Heart,
                     details: [
-                      { title: "CUSTOMER DELIGHT", subtitle: "CUSTOMER HAPPINESS", desc: "Always placing customer needs and satisfaction as the top priority." },
+                      { title: "CUSTOMER DELIGHT", subtitle: "CUSTOMER HAPPINESS", desc: "Always placing customer needs and satisfaction as our top priority." },
                       { title: "COMMITMENT IN CONSISTENCY", subtitle: "COMMITMENT TO CONSISTENCY", desc: "Maintaining consistency in quality and service at all times, without exception." },
-                      { title: "AGILITY", subtitle: "AGILITY & ADAPTABILITY", desc: "Fast, accurate, and adaptive in meeting customer needs." }
+                      { title: "AGILITY", subtitle: "AGILITY & ADAPTABILITY", desc: "Fast, accurate, and adaptable in meeting customer needs." }
                     ]
                   },
                   {
@@ -218,9 +218,9 @@ export default function About() {
                     rest: "ELIABILITY",
                     icon: Shield,
                     details: [
-                      { title: "OWNERSHIP & ACCOUNTABILITY", subtitle: "OWNERSHIP & ACCOUNTABILITY", desc: "Having full responsibility for work results and actions taken." },
-                      { title: "SYNERGY IN ACTION", subtitle: "SYNERGY IN ACTION", desc: "Working together and actively combining each other's potential to achieve common goals based on trust, care, and harmony." },
-                      { title: "OPEN COMMUNICATION", subtitle: "OPEN COMMUNICATION", desc: "Open in sharing information, ideas, as well as suggestions and criticism to build trust and achieve common goals." }
+                      { title: "OWNERSHIP & ACCOUNTABILITY", subtitle: "OWNERSHIP & ACCOUNTABILITY", desc: "Taking full responsibility for work results and actions taken." },
+                      { title: "SYNERGY IN ACTION", subtitle: "SYNERGY IN ACTION", desc: "Collaborating and actively blending strengths to achieve common goals based on trust, care, and harmony." },
+                      { title: "OPEN COMMUNICATION", subtitle: "OPEN COMMUNICATION", desc: "Openly sharing information, ideas, suggestions, and feedback to build trust and achieve shared objectives." }
                     ]
                   },
                   {
@@ -228,9 +228,9 @@ export default function About() {
                     rest: "NNOVATION",
                     icon: Zap,
                     details: [
-                      { title: "ACTIVE LEARNING", subtitle: "ACTIVE LEARNING", desc: "The ability to continuously learn and adapt quickly in facing new challenges." },
-                      { title: "EFFECTIVE & EFFICIENT", subtitle: "EFFECTIVE & EFFICIENT", desc: "Using creative approaches to solve problems effectively and efficiently. Doing the right things the right way so that company goals can be achieved without waste." },
-                      { title: "CONTINUOUS IMPROVEMENT", subtitle: "CONTINUOUS IMPROVEMENT", desc: "Continuously making relevant changes and improvements to market needs." }
+                      { title: "ACTIVE LEARNING", subtitle: "ACTIVE LEARNING", desc: "Continuously learning and quickly adapting when facing new challenges." },
+                      { title: "EFFECTIVE & EFFICIENT", subtitle: "EFFECTIVE & EFFICIENT", desc: "Using creative approaches to solve problems effectively and efficiently. Doing the right things in the right way so company goals are achieved without waste." },
+                      { title: "CONTINUOUS IMPROVEMENT", subtitle: "CONTINUOUS IMPROVEMENT", desc: "Continuously pursuing relevant improvements and innovations to match market needs." }
                     ]
                   },
                   {
@@ -238,9 +238,9 @@ export default function About() {
                     rest: "IRTUE",
                     icon: Star,
                     details: [
-                      { title: "INTEGRITY", subtitle: "INTEGRITY", desc: "Maintaining honesty and moral principles in every interaction, both with customers and coworkers." },
-                      { title: "MUTUAL RESPECT", subtitle: "MUTUAL RESPECT", desc: "Valuing each other with full respect, both in work and personal relationships." },
-                      { title: "PURPOSEFUL CONTRIBUTION", subtitle: "PURPOSEFUL CONTRIBUTION", desc: "Contributing with a clear purpose, to create a positive impact on the company and society." }
+                      { title: "INTEGRITY", subtitle: "INTEGRITY", desc: "Upholding honesty and moral principles in every interaction with customers and colleagues." },
+                      { title: "MUTUAL RESPECT", subtitle: "MUTUAL RESPECT", desc: "Treating everyone with profound respect in both professional and personal relationships." },
+                      { title: "PURPOSEFUL CONTRIBUTION", subtitle: "MEANINGFUL CONTRIBUTION", desc: "Contributing with clear purpose to create a positive impact for the company and society." }
                     ]
                   },
                   {
@@ -248,8 +248,8 @@ export default function About() {
                     rest: "XCELLENCE",
                     icon: Award,
                     details: [
-                      { title: "PEOPLE-ORIENTED", subtitle: "PEOPLE-ORIENTED", desc: "Prioritizing the well-being, development, and engagement of every individual in the company to create a positive and productive work environment." },
-                      { title: "HIGH-PERFORMING ORGANIZATION", subtitle: "HIGH-PERFORMING ORGANIZATION", desc: "Building a work culture focused on achieving the best results through collaboration and high performance standards." }
+                      { title: "PEOPLE-ORIENTED", subtitle: "EMPLOYEE ORIENTED", desc: "Prioritizing employee well-being, growth, and engagement to foster a positive and productive workspace." },
+                      { title: "HIGH-PERFORMING ORGANIZATION", subtitle: "HIGH-PERFORMING ORGANIZATION", desc: "Building a culture focused on achieving outstanding results through collaboration and high performance standards." }
                     ]
                   }
                 ].map((val, idx) => (

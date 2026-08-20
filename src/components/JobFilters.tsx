@@ -75,7 +75,7 @@ const positions = [
   "Sales Executive",
   "Administration Head",
   "Admin Sales",
-  "Admin Faktur",
+  "Invoice Admin",
   "Admin AR",
   "Admin Service",
   "Cashier",

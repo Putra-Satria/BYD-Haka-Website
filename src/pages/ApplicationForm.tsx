@@ -586,7 +586,7 @@ export default function ApplicationForm() {
                     required={!paklaringUrl}
                   />
                   <p className="text-xs text-muted-foreground">
-                    *For fresh graduates and first-time job seekers, please attach Diploma / Certificate of Graduation (SKL)
+                    *For fresh graduates and first-time job seekers, please attach Diploma / SKL
                   </p>
                   <p className="text-xs text-muted-foreground">
                     Upload 1 supported file: PDF. Max 5 MB.
