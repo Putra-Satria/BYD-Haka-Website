@@ -1,0 +1,877 @@
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
+import { z } from "zod";
+import { buildSecureFilePath, logSecurityAudit, validateSecureUpload } from "@/lib/securityHardening";
+import { Eye, EyeOff } from "lucide-react";
+import TopNav from "@/components/TopNav";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import authIllustration from "@/assets/auth-illustration.png";
+import Footer from "@/components/Footer";
+import { provinces } from "@/data/provinces"; // Import provinces
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+const loginSchema = z.object({
+  email: z.string().email({ message: "Invalid email" }),
+  password: z.string().min(6, { message: "Password must be at least 6 characters" }),
+});
+
+const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
+
+const registerSchema = z.object({
+  nik: z.string().length(16, "NIK must be 16 digits").regex(/^\d+$/, "NIK must be numbers"),
+  fullName: z.string().min(3, "Full name must be at least 3 characters"),
+  email: z.string().email({ message: "Invalid email" }),
+  password: z.string()
+    .min(8, { message: "Password must be at least 8 characters" })
+    .max(16, { message: "Password must be at most 16 characters" })
+    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]+$/, {
+      message: "Password must contain uppercase, lowercase, number, and symbol"
+    }),
+  confirmPassword: z.string(),
+  residentialAddress: z.string().min(3, "Address required"),
+  cityProvince: z.string().min(3, "Province required"),
+  dateOfBirth: z.string().min(1, "Date of birth required"),
+  gender: z.enum(["male", "female"], { required_error: "Gender required" }),
+  whatsappNumber: z.string().min(10, "Valid WhatsApp number required"),
+  expectedSalary: z.number().positive("Valid salary required"),
+  hasAutomotiveExperience: z.boolean(),
+  workExperienceDuration: z.string().min(1, "Experience duration required"),
+  educationLevel: z.string().min(1, "Education level required"),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
+
+export default function Auth() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const mode = searchParams.get("mode");
+  const [isLogin, setIsLogin] = useState(mode !== "register");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setIsLogin(mode !== "register");
+  }, [mode]);
+
+  // Login form
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  // Register form state
+  const [nik, setNik] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const [residentialAddress, setResidentialAddress] = useState("");
+  const [cityProvince, setCityProvince] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [gender, setGender] = useState("");
+  const [whatsappNumber, setWhatsappNumber] = useState("");
+  const [expectedSalary, setExpectedSalary] = useState("");
+  const [hasAutomotiveExperience, setHasAutomotiveExperience] = useState<string>("");
+  const [workExperienceDuration, setWorkExperienceDuration] = useState("");
+
+  const [educationLevel, setEducationLevel] = useState("");
+  const [emailError, setEmailError] = useState(false); // Add email error state
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const calculateStrength = (pass: string) => {
+    let strength = 0;
+    if (pass.length >= 8) strength++;
+    if (/[a-z]/.test(pass)) strength++;
+    if (/[A-Z]/.test(pass)) strength++;
+    if (/\d/.test(pass)) strength++;
+    if (/[!@#$%^&*(),.?":{}|<>]/.test(pass)) strength++;
+    return strength;
+  };
+
+  const passwordStrength = calculateStrength(registerPassword);
+
+  const formatRupiah = (value: string) => {
+    const numberString = value.replace(/[^,\d]/g, "").toString();
+    const split = numberString.split(",");
+    const sisa = split[0].length % 3;
+    let rupiah = split[0].substr(0, sisa);
+    const ribuan = split[0].substr(sisa).match(/\d{3}/gi);
+
+    if (ribuan) {
+      const separator = sisa ? "." : "";
+      rupiah += separator + ribuan.join(".");
+    }
+
+    rupiah = split[1] !== undefined ? rupiah + "," + split[1] : rupiah;
+    return "Rp " + rupiah;
+  };
+
+  const handleSalaryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setExpectedSalary(formatRupiah(e.target.value));
+  };
+
+  const handleWhatsappChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value.replace(/[^0-9]/g, "");
+    if (value.startsWith("62")) {
+      value = "0" + value.slice(2);
+    } else if (value.length > 0 && !value.startsWith("0")) {
+      value = "0" + value;
+    }
+    setWhatsappNumber(value);
+  };
+
+  const handleNikChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/[^0-9]/g, "");
+    setNik(value);
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.toLowerCase();
+    setRegisterEmail(value);
+    // Simple regex check for invalid format to trigger red border logic if needed immediately, 
+    // or just rely on blur/submit. User asked for "jika ada ... maka border input field akan merah"
+    // We can check validity here or on blur. Let's reset error on change.
+    if (value.includes("@")) setEmailError(false);
+  };
+
+  const handleEmailBlur = () => {
+    if (!registerEmail) return;
+    const isValid = z.string().email().safeParse(registerEmail).success;
+    setEmailError(!isValid);
+  };
+
+  // Forgot Password State
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+
+  // Login Verification State (2-step)
+  const [showLoginVerification, setShowLoginVerification] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+
+
+  const [cvFile, setCvFile] = useState<File | null>(null);
+  const [paklaringFile, setPaklaringFile] = useState<File | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+
+  const [cvError, setCvError] = useState("");
+  const [paklaringError, setPaklaringError] = useState("");
+  const [photoError, setPhotoError] = useState("");
+
+  const handleCvChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > MAX_PDF_SIZE) {
+        setCvError("File size exceeds 5MB limit");
+        setCvFile(null);
+        e.target.value = "";
+      } else {
+        setCvError("");
+        setCvFile(file);
+      }
+    }
+  };
+
+  const handlePaklaringChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > MAX_PDF_SIZE) {
+        setPaklaringError("File size exceeds 5MB limit");
+        setPaklaringFile(null);
+        e.target.value = "";
+      } else {
+        setPaklaringError("");
+        setPaklaringFile(file);
+      }
+    }
+  };
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > MAX_IMAGE_SIZE) {
+        setPhotoError("File size exceeds 2MB limit");
+        setPhotoFile(null);
+        e.target.value = "";
+      } else {
+        setPhotoError("");
+        setPhotoFile(file);
+      }
+    }
+  };
+
+  const checkUserRole = async (userId: string) => {
+    const { data } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId);
+
+    const roles = data?.map((item) => item.role) || [];
+
+    if (roles.includes("admin")) {
+      navigate("/admin");
+    } else {
+      navigate("/profile");
+    }
+  };
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        checkUserRole(session.user.id);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        checkUserRole(session.user.id);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [navigate]);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    try {
+      const validated = loginSchema.parse({ email, password });
+      setLoading(true);
+
+      // Step 1: Verify credentials are correct
+      const { error } = await supabase.auth.signInWithPassword({
+        email: validated.email,
+        password: validated.password,
+      });
+
+      if (error) throw error;
+
+      // Step 2: Sign out immediately to prevent auto-login before email verification
+      await supabase.auth.signOut();
+
+      // Step 3: Send magic link for 2-step verification
+      const { error: otpError } = await supabase.auth.signInWithOtp({
+        email: validated.email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth`,
+        },
+      });
+
+      if (otpError) throw otpError;
+
+      // Step 4: Show verification dialog and start resend cooldown
+      setVerificationEmail(validated.email);
+      setShowLoginVerification(true);
+      setResendCooldown(60);
+    } catch (error: any) {
+      console.error("Login Check Error:", error);
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+      } else if (error instanceof Error) {
+        // Check for specific Supabase errors
+        if (error.message.includes("Email not confirmed")) {
+          toast.error("Please verify your email address before logging in.");
+        } else if (error.message.includes("Invalid login credentials")) {
+          toast.error("Invalid email or password.");
+        } else {
+          toast.error(error.message || "An error occurred during login");
+        }
+      } else {
+        toast.error("An unexpected error occurred");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Resend OTP handler with cooldown
+  const handleResendOtp = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: verificationEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth`,
+        },
+      });
+      if (error) throw error;
+      toast.success("Verification email resent! Please check your inbox.");
+      setResendCooldown(60);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to resend verification email.");
+    }
+  };
+
+  // Cooldown timer effect
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  const uploadFile = async (userId: string, file: File, folder: string, bucket: string = 'application-documents'): Promise<string> => {
+    const documentType = bucket === "avatars" ? "photo" : folder === "cv" ? "cv" : "certificate";
+    const validation = validateSecureUpload(file, documentType);
+    if (!validation.valid) {
+      throw new Error(validation.message);
+    }
+
+    const fileName = buildSecureFilePath(userId, file, folder);
+
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type || undefined,
+      });
+
+    if (uploadError) {
+      await logSecurityAudit({
+        action: "UPLOAD_DOCUMENT",
+        targetUserId: userId,
+        documentPath: `${bucket}/${fileName}`,
+        status: "failed",
+        description: `Failed to upload ${folder}: ${uploadError.message}`,
+      });
+      throw new Error(`Failed to upload ${folder}: ${uploadError.message}`);
+    }
+
+    await logSecurityAudit({
+      action: "UPLOAD_DOCUMENT",
+      targetUserId: userId,
+      documentPath: `${bucket}/${fileName}`,
+      status: "success",
+      description: `Registered applicant uploaded ${folder} with file validation and UUID filename.`,
+    });
+
+    return fileName;
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Custom validation for files
+    if (!cvFile && !cvError) {
+      toast.error("Please upload your CV");
+      return;
+    }
+    if (!paklaringFile && !paklaringError) {
+      toast.error("Please upload your Paklaring/Certificate");
+      return;
+    }
+    if (!photoFile && !photoError) {
+      toast.error("Please upload your Pass Foto");
+      return;
+    }
+
+    if (cvError || paklaringError || photoError) {
+      toast.error("Please fix file upload errors before submitting");
+      return;
+    }
+
+    try {
+      const parsedSalary = parseFloat(expectedSalary.replace(/[^0-9]/g, ''));
+
+      const validated = registerSchema.parse({
+        nik,
+        fullName,
+        email: registerEmail,
+        password: registerPassword,
+        confirmPassword,
+        residentialAddress,
+        cityProvince,
+        dateOfBirth,
+        gender,
+        whatsappNumber,
+        expectedSalary: parsedSalary,
+        hasAutomotiveExperience: hasAutomotiveExperience === "yes",
+        workExperienceDuration,
+        educationLevel,
+      });
+
+      setLoading(true);
+
+      // 1. Generate Temp ID for File Uploads (Since we don't have user ID yet)
+      const tempId = self.crypto.randomUUID();
+
+      // 2. Upload Files FIRST
+      let cvUrl = "";
+      let paklaringUrl = "";
+      let photoUrl = "";
+
+      try {
+        // Upload immediately using the temp ID
+        // Note: RLS must allow public INSERT for this to work
+        cvUrl = await uploadFile(tempId, cvFile!, 'cv', 'application-documents');
+        paklaringUrl = await uploadFile(tempId, paklaringFile!, 'certificate', 'application-documents');
+        photoUrl = await uploadFile(tempId, photoFile!, 'photos', 'avatars');
+
+      } catch (fileError: any) {
+        console.error("Pre-registration file upload failed:", fileError);
+        toast.error(`File upload failed: ${fileError.message}. Please try again.`);
+        setLoading(false);
+        return; // Stop registration if files fail
+      }
+
+      const metadata = {
+        nik: validated.nik,
+        full_name: validated.fullName,
+        residential_address: validated.residentialAddress,
+        city_province: validated.cityProvince,
+        date_of_birth: validated.dateOfBirth,
+        gender: validated.gender,
+        whatsapp_number: validated.whatsappNumber,
+        expected_salary: validated.expectedSalary,
+        has_automotive_experience: validated.hasAutomotiveExperience,
+        work_experience_duration: validated.workExperienceDuration,
+        education_level: validated.educationLevel,
+        // Pass the uploaded file URLs to metadata
+        cv_url: cvUrl,
+        certificate_url: paklaringUrl,
+        avatar_url: photoUrl,
+        info_source: "website",
+      };
+
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: validated.email,
+        password: validated.password,
+        options: {
+          data: metadata,
+          emailRedirectTo: `${window.location.origin}/auth`,
+        },
+      });
+
+      if (authError) throw authError;
+
+      if (authData.user) {
+        toast.success("Registration successful! Please check your email to verify your account.");
+        // Reset form? Or just wait for redirect logic if applicable, but usually verification is needed.
+        setIsLogin(true); // Switch to login view
+      }
+
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+      } else if (error instanceof Error) {
+        toast.error(error.message);
+      }
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail) {
+      toast.error("Please enter your email address");
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+
+      if (error) throw error;
+
+      toast.success("Password reset link sent! Please check your email.");
+      setShowForgotPassword(false);
+      setResetEmail("");
+    } catch (error: any) {
+      console.error("Reset password error:", error);
+      toast.error(error.message || "Failed to send reset link");
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-white">
+      <TopNav isPublic={true} />
+
+      <div className="flex flex-col lg:flex-row min-h-[calc(100vh-64px)]">
+        {/* Left Side - Illustration */}
+        <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12 bg-white sticky top-[64px] h-[calc(100vh-64px)]">
+          <div className="max-w-xl">
+            <img
+              src={authIllustration}
+              alt="Haka Auto Talent Hunt"
+              className="w-full h-auto object-contain animate-fade-in"
+            />
+          </div>
+        </div>
+
+        {/* Right Side - Form */}
+        <div className="w-full lg:w-1/2 bg-white p-6 lg:p-12">
+          <div className={`w-full ${isLogin ? 'max-w-md' : 'max-w-2xl'} space-y-8 animate-fade-in m-auto`}>
+
+            <div className="space-y-2">
+              <h2 className="text-3xl font-bold text-primary tracking-tight">
+                {isLogin ? "Login" : "Register"}
+              </h2>
+              {/* <p className="text-muted-foreground">
+                {isLogin ? "Welcome back!" : "Create your account"}
+              </p> */}
+            </div>
+
+            <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-6">
+              {isLogin ? (
+                /* LOGIN FORM */
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="email" className="text-sm font-medium text-gray-700">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="Enter Email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      className="bg-gray-50 border-gray-200 focus:bg-white transition-colors"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="password" className="text-sm font-medium text-gray-700">Password</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="Password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      className="bg-gray-50 border-gray-200 focus:bg-white transition-colors"
+                    />
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotPassword(true)}
+                      className="text-sm font-medium text-primary hover:underline"
+                    >
+                      Forgot Password?
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* REGISTER FORM */
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* SAME REGISTER FIELDS BUT STYLED */}
+                  <div className="space-y-4">
+                    {/* Account & Personal */}
+                    <div className="space-y-2">
+                      <Label htmlFor="regEmail">Email *</Label>
+                      <Input
+                        id="regEmail"
+                        type="email"
+                        value={registerEmail}
+                        onChange={handleEmailChange}
+                        onBlur={handleEmailBlur}
+                        required
+                        className={`bg-gray-50 border-gray-200 ${emailError ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="nik">NIK KTP (16 Digits) *</Label>
+                      <Input id="nik" value={nik} onChange={handleNikChange} maxLength={16} required className="bg-gray-50 border-gray-200" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="fullName">Full Name *</Label>
+                      <Input id="fullName" value={fullName} onChange={e => setFullName(e.target.value.toUpperCase())} required className="bg-gray-50 border-gray-200" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="regPass">Password *</Label>
+                      <div className="relative">
+                        <Input
+                          id="regPass"
+                          type={showPassword ? "text" : "password"}
+                          value={registerPassword}
+                          onChange={e => setRegisterPassword(e.target.value)}
+                          required
+                          className="bg-gray-50 border-gray-200 pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                        >
+                          {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+
+                      {/* Strength Meter */}
+                      <div className="h-1 w-full bg-gray-200 rounded-full overflow-hidden mt-2">
+                        <div
+                          className={`h-full transition-all duration-300 ${passwordStrength <= 2 ? 'bg-red-500' :
+                              passwordStrength <= 4 ? 'bg-yellow-500' : 'bg-green-500'
+                            }`}
+                          style={{ width: `${(passwordStrength / 5) * 100}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        *Password must be at least 8 characters (combination of numbers, uppercase, lowercase, and special characters #$^+=!*()@%&))
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="regConfirm">Confirm Password *</Label>
+                      <div className="relative">
+                        <Input
+                          id="regConfirm"
+                          type={showConfirmPassword ? "text" : "password"}
+                          value={confirmPassword}
+                          onChange={e => setConfirmPassword(e.target.value)}
+                          required
+                          className="bg-gray-50 border-gray-200 pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                        >
+                          {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Details */}
+                    <div className="space-y-2">
+                      <Label htmlFor="whatsapp">WhatsApp Number *</Label>
+                      <Input id="whatsapp" value={whatsappNumber} onChange={handleWhatsappChange} type="tel" required className="bg-gray-50 border-gray-200" placeholder="08..." />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dob">Date of Birth *</Label>
+                      <Input id="dob" type="date" value={dateOfBirth} onChange={e => setDateOfBirth(e.target.value)} required className="bg-gray-50 border-gray-200" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Gender *</Label>
+                      <Select value={gender} onValueChange={setGender} required>
+                        <SelectTrigger className="bg-gray-50 border-gray-200">
+                          <SelectValue placeholder="Select Gender" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="male">Male</SelectItem>
+                          <SelectItem value="female">Female</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="province">Province *</Label>
+                      <Select value={cityProvince} onValueChange={setCityProvince} required>
+                        <SelectTrigger className="bg-gray-50 border-gray-200">
+                          <SelectValue placeholder="Select Province" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {provinces.map((province) => (
+                            <SelectItem key={province} value={province}>
+                              {province}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="address">Address *</Label>
+                      <Input id="address" value={residentialAddress} onChange={e => setResidentialAddress(e.target.value.toUpperCase())} required className="bg-gray-50 border-gray-200" />
+                    </div>
+                  </div>
+
+                  {/* Full width fields for complex sections */}
+                  <div className="col-span-1 md:col-span-2 space-y-4 border-t pt-4 mt-2">
+                    <h3 className="font-semibold text-gray-900">Experience & Education</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="salary">Expected Salary *</Label>
+                        <Input id="salary" value={expectedSalary} onChange={handleSalaryChange} required className="bg-gray-50 border-gray-200" placeholder="Rp 0" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Education Level *</Label>
+                        <Select value={educationLevel} onValueChange={setEducationLevel} required>
+                          <SelectTrigger className="bg-gray-50 border-gray-200"><SelectValue placeholder="Select Level" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="sma">SMA/SMK</SelectItem>
+                            <SelectItem value="d3">D3</SelectItem>
+                            <SelectItem value="s1">S1</SelectItem>
+                            <SelectItem value="s2">S2</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Experience Duration *</Label>
+                        <Select value={workExperienceDuration} onValueChange={setWorkExperienceDuration} required>
+                          <SelectTrigger className="bg-gray-50 border-gray-200"><SelectValue placeholder="Select Duration" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="<1">&lt; 1 Year</SelectItem>
+                            <SelectItem value="1-3">1 - 3 Years</SelectItem>
+                            <SelectItem value="3-5">3 - 5 Years</SelectItem>
+                            <SelectItem value=">5">&gt; 5 Years</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Automotive Experience? *</Label>
+                        <Select value={hasAutomotiveExperience} onValueChange={setHasAutomotiveExperience} required>
+                          <SelectTrigger className="bg-gray-50 border-gray-200"><SelectValue placeholder="Select..." /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="yes">Yes</SelectItem>
+                            <SelectItem value="no">No</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="col-span-1 md:col-span-2 space-y-4 border-t pt-4">
+                    <h3 className="font-semibold text-gray-900">Documents</h3>
+                    <div className="space-y-2">
+                      <Label>CV (PDF, Max 5MB) *</Label>
+                      <Input type="file" accept=".pdf" onChange={handleCvChange} required className={`bg-gray-50 border-gray-200 ${cvError ? 'border-red-500' : ''}`} />
+                      {cvError && <p className="text-red-500 text-xs">{cvError}</p>}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Experience Certificate / Paklaring (PDF, Max 5MB) *</Label>
+                      <Input type="file" accept=".pdf" onChange={handlePaklaringChange} required className={`bg-gray-50 border-gray-200 ${paklaringError ? 'border-red-500' : ''}`} />
+                      {paklaringError && <p className="text-red-500 text-xs">{paklaringError}</p>}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Passport Photo (Image, Max 2MB) *</Label>
+                      <Input type="file" accept="image/*" onChange={handlePhotoChange} required className={`bg-gray-50 border-gray-200 ${photoError ? 'border-red-500' : ''}`} />
+                      {photoError && <p className="text-red-500 text-xs">{photoError}</p>}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
+              <div className="space-y-4 pt-2">
+                <Button type="submit" className="w-full h-11 text-base font-semibold" disabled={loading}>
+                  {loading ? "Processing..." : isLogin ? "Login" : "Register"}
+                </Button>
+
+                <div className="flex items-center justify-between pt-2">
+                  <span className="text-sm font-bold text-primary">
+                    {isLogin ? "Don't have an account?" : "Already have an account?"}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="default"
+                    onClick={() => setIsLogin(!isLogin)}
+                    className="bg-primary hover:bg-primary/90 text-white min-w-[100px]"
+                  >
+                    {isLogin ? "Register" : "Login"}
+                  </Button>
+                </div>
+              </div>
+            </form>
+
+
+          </div>
+        </div>
+      </div>
+      <Footer />
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={showForgotPassword} onOpenChange={setShowForgotPassword}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset Password</DialogTitle>
+            <DialogDescription>
+              Enter your email address and we'll send you a link to reset your password.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="resetEmail">Email</Label>
+              <Input
+                id="resetEmail"
+                type="email"
+                placeholder="Enter your email"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                required
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setShowForgotPassword(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={resetLoading}>
+                {resetLoading ? "Sending..." : "Send Reset Link"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Login 2-Step Verification Dialog */}
+      <Dialog open={showLoginVerification} onOpenChange={setShowLoginVerification}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect width="20" height="16" x="2" y="4" rx="2"/>
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+              </svg>
+              Check Your Email
+            </DialogTitle>
+            <DialogDescription className="pt-2 space-y-3">
+              <p>
+                A verification link has been sent to <strong className="text-foreground">{verificationEmail}</strong>.
+              </p>
+              <p>
+                Please check your inbox (and spam/junk folder) and click the link to complete your login.
+              </p>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowLoginVerification(false)}
+            >
+              Close
+            </Button>
+            <Button
+              type="button"
+              onClick={handleResendOtp}
+              disabled={resendCooldown > 0}
+            >
+              {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Email'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

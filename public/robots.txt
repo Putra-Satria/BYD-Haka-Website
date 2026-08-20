@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://career.hakaauto.co.id/sitemap.xml

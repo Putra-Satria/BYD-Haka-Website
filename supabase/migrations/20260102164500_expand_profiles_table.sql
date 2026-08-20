@@ -1,0 +1,12 @@
+ALTER TABLE public.profiles
+ADD COLUMN IF NOT EXISTS residential_address TEXT,
+ADD COLUMN IF NOT EXISTS city_province TEXT,
+ADD COLUMN IF NOT EXISTS date_of_birth DATE,
+ADD COLUMN IF NOT EXISTS gender TEXT,
+ADD COLUMN IF NOT EXISTS expected_salary NUMERIC,
+ADD COLUMN IF NOT EXISTS has_automotive_experience BOOLEAN,
+ADD COLUMN IF NOT EXISTS work_experience_duration TEXT,
+ADD COLUMN IF NOT EXISTS education_level TEXT,
+ADD COLUMN IF NOT EXISTS cv_url TEXT,
+ADD COLUMN IF NOT EXISTS certificate_url TEXT,
+ADD COLUMN IF NOT EXISTS info_source TEXT;

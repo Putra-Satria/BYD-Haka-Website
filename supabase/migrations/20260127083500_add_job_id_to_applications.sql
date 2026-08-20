@@ -1,0 +1,2 @@
+ALTER TABLE public.applications 
+ADD COLUMN IF NOT EXISTS job_id UUID REFERENCES public.jobs(id) ON DELETE SET NULL;

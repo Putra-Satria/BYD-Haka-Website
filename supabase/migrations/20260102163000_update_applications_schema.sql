@@ -1,0 +1,5 @@
+ALTER TABLE public.applications 
+ADD COLUMN IF NOT EXISTS nik TEXT,
+ADD COLUMN IF NOT EXISTS whatsapp_number TEXT,
+ADD COLUMN IF NOT EXISTS date_of_birth DATE,
+ADD COLUMN IF NOT EXISTS city_province TEXT;
