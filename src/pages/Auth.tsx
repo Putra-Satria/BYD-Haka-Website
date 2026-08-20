@@ -257,9 +257,34 @@ export default function Auth() {
 
       if (error) throw error;
 
-      toast.success("Login successful!");
-      if (data.user) {
-        await checkUserRole(data.user.id);
+      toast.success("Factor 1 Authentication Successful! Redirecting to 2FA Verification...");
+
+      if (data.user && data.session) {
+        // Request 2FA OTP generation from backend server
+        try {
+          const serverUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+          await fetch(`${serverUrl}/api/2fa/send`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${data.session.access_token}`
+            },
+            credentials: "include"
+          });
+        } catch (sendErr) {
+          console.warn("Backend 2FA Send Trigger Warning:", sendErr);
+        }
+
+        // Clear previous 2FA session state
+        sessionStorage.removeItem("haka_2fa_verified");
+        sessionStorage.removeItem("haka_2fa_token");
+
+        navigate("/verify-otp", {
+          state: {
+            userId: data.user.id,
+            email: validated.email,
+          },
+        });
       }
     } catch (error: any) {
       console.error("Login Check Error:", error);

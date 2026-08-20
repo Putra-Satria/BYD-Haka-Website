@@ -24,6 +24,8 @@ import FixedEmployees from "./pages/FixedEmployees";
 import SecurityMonitoring from "./pages/SecurityMonitoring";
 import SecurityAudit from "./pages/SecurityAudit";
 import AccessControl from "./pages/AccessControl";
+import VerifyOTP from "./pages/VerifyOTP";
+import { TwoFactorGuard } from "./components/TwoFactorGuard";
 import { SessionTimeout } from "./components/SessionTimeout";
 
 const queryClient = new QueryClient();
@@ -47,15 +49,16 @@ const App = () => (
           <Route path="/application-success" element={<ApplicationSuccess />} />
           <Route path="/applications" element={<Applications />} />
           <Route path="/onboarding" element={<EmployeeOnboarding />} />
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/admin/talent-pool" element={<TalentPool />} />
-          <Route path="/admin/fixed-employees" element={<FixedEmployees />} />
-          <Route path="/security-monitoring" element={<SecurityMonitoring />} />
-          <Route path="/admin/security-audit" element={<SecurityAudit />} />
-          <Route path="/admin/access-control" element={<AccessControl />} />
+          <Route path="/admin" element={<TwoFactorGuard><AdminDashboard /></TwoFactorGuard>} />
+          <Route path="/admin/talent-pool" element={<TwoFactorGuard><TalentPool /></TwoFactorGuard>} />
+          <Route path="/admin/fixed-employees" element={<TwoFactorGuard><FixedEmployees /></TwoFactorGuard>} />
+          <Route path="/security-monitoring" element={<TwoFactorGuard><SecurityMonitoring /></TwoFactorGuard>} />
+          <Route path="/admin/security-audit" element={<TwoFactorGuard><SecurityAudit /></TwoFactorGuard>} />
+          <Route path="/admin/access-control" element={<TwoFactorGuard><AccessControl /></TwoFactorGuard>} />
           <Route path="/tentang-kami" element={<About />} />
           <Route path="/kontak-kami" element={<Contact />} />
           <Route path="/auth" element={<Auth />} />
+          <Route path="/verify-otp" element={<VerifyOTP />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />

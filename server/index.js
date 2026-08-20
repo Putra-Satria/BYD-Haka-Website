@@ -3,6 +3,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -24,6 +25,11 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use(cookieParser());
+
+// 2FA Production Router
+const twoFactorRouter = require('./routes/twoFactor');
+app.use('/api/2fa', twoFactorRouter);
 
 // Token Cache
 let wazuhToken = null;
