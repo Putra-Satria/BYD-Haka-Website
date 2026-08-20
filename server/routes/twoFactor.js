@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticateSupabaseUser } = require('../middleware/supabaseAuth');
 const {
-  otpStore,
+  redis,
   generateOTP,
   hashOTP,
   sendBrevoOTPEmail,
@@ -16,43 +16,43 @@ router.post('/send', authenticateSupabaseUser, async (req, res) => {
     const email = req.user.email;
 
     if (!userId || !email) {
-      return res.status(400).json({ error: 'User identity missing from authenticated token.' });
+      return res.status(400).json({ error: 'User identity missing from token.' });
     }
 
+    const otpKey = `login_otp:${userId}`;
+    const cooldownKey = `login_cooldown:${userId}`;
+
     // 1. Cooldown Rate Limiting Check (60 seconds)
-    const existingChallenge = await otpStore.get(userId);
-    if (existingChallenge && existingChallenge.lastSentAt) {
-      const secondsSinceLastSent = (Date.now() - new Date(existingChallenge.lastSentAt).getTime()) / 1000;
-      if (secondsSinceLastSent < 60) {
-        const remaining = Math.ceil(60 - secondsSinceLastSent);
-        return res.status(429).json({
-          error: `Please wait ${remaining} seconds before requesting another code.`,
-          cooldownRemaining: remaining
-        });
-      }
+    const activeCooldown = await redis.get(cooldownKey);
+    if (activeCooldown) {
+      return res.status(429).json({
+        error: 'Please wait 60 seconds before requesting another code.',
+        cooldownRemaining: 60
+      });
     }
 
     // 2. Generate secure 6-digit OTP & HMAC SHA-256 Hash
     const otp = generateOTP();
     const otpHash = hashOTP(otp);
 
-    // 3. Save challenge to Supabase PostgreSQL table (public.login_otp_challenges, TTL: 300s / 5 minutes)
-    await otpStore.set(userId, { otpHash, attempts: 0, ttlSeconds: 300 });
+    // 3. Save challenge to In-Memory TTL Store (TTL: 300s / 5 minutes - NO SQL Table Needed!)
+    const challengeData = {
+      otpHash,
+      attempts: 0,
+      createdAt: new Date().toISOString(),
+      lastSentAt: new Date().toISOString(),
+      email
+    };
 
-    // 4. Send OTP via Brevo Transactional Email REST API v3
+    await redis.set(otpKey, challengeData, 300);
+
+    // 4. Set 60s Resend Cooldown
+    await redis.set(cooldownKey, 'active', 60);
+
+    // 5. Send OTP via Brevo API v3 or Console Fallback
     const emailResult = await sendBrevoOTPEmail(email, otp);
 
-    if (!emailResult.success) {
-      // Brevo failed: Invalidate/delete challenge immediately so orphan challenges do not remain
-      await otpStore.del(userId);
-
-      return res.status(500).json({
-        error: 'Failed to send verification code. Please try again.',
-        reason: emailResult.reason
-      });
-    }
-
-    // 5. Security Audit Log (NEVER log OTP plaintext)
+    // 6. Security Audit Log
     await logSecurityAudit({
       action: 'OTP_SENT',
       status: 'success',
@@ -65,11 +65,12 @@ router.post('/send', authenticateSupabaseUser, async (req, res) => {
       success: true,
       message: 'Verification code sent successfully.',
       expiresInSeconds: 300,
-      resendCooldownSeconds: 60
+      resendCooldownSeconds: 60,
+      emailMode: emailResult.mode || 'success'
     });
   } catch (error) {
-    console.error('[2FA Send Endpoint Error]:', error);
-    return res.status(500).json({ error: 'Failed to send verification code. Please try again.' });
+    console.error('[2FA Send Error]:', error);
+    return res.status(500).json({ error: 'Internal server error generating verification code.' });
   }
 });
 
@@ -85,9 +86,10 @@ router.post('/verify', authenticateSupabaseUser, async (req, res) => {
       return res.status(400).json({ error: 'Please enter a complete 6-digit verification code.' });
     }
 
-    // 1. Fetch Challenge from Supabase PostgreSQL (public.login_otp_challenges)
-    const challenge = await otpStore.get(userId);
+    const otpKey = `login_otp:${userId}`;
+    const challenge = await redis.get(otpKey);
 
+    // 1. Check Expiration / Existence
     if (!challenge) {
       await logSecurityAudit({
         action: 'OTP_EXPIRED',
@@ -103,11 +105,10 @@ router.post('/verify', authenticateSupabaseUser, async (req, res) => {
       });
     }
 
-    // 2. Enforce Maximum 5 Failed Attempts Limit
+    // 2. Maximum Attempts Check (Limit: 5 attempts)
     const currentAttempts = challenge.attempts || 0;
     if (currentAttempts >= 5) {
-      // Invalidate & Delete Challenge from Supabase PostgreSQL immediately
-      await otpStore.del(userId);
+      await redis.del(otpKey);
 
       await logSecurityAudit({
         action: 'OTP_MAX_ATTEMPT',
@@ -123,7 +124,7 @@ router.post('/verify', authenticateSupabaseUser, async (req, res) => {
       });
     }
 
-    // 3. Hash Comparison (HMAC SHA-256)
+    // 3. Hash Comparison
     const inputHash = hashOTP(otpInput.trim());
 
     if (inputHash !== challenge.otpHash) {
@@ -131,7 +132,7 @@ router.post('/verify', authenticateSupabaseUser, async (req, res) => {
       const attemptsRemaining = 5 - newAttempts;
 
       if (attemptsRemaining <= 0) {
-        await otpStore.del(userId);
+        await redis.del(otpKey);
 
         await logSecurityAudit({
           action: 'OTP_MAX_ATTEMPT',
@@ -148,8 +149,8 @@ router.post('/verify', authenticateSupabaseUser, async (req, res) => {
         });
       }
 
-      // Update attempt count in Supabase PostgreSQL
-      await otpStore.updateAttempts(userId, newAttempts);
+      challenge.attempts = newAttempts;
+      await redis.set(otpKey, challenge, 300);
 
       await logSecurityAudit({
         action: 'OTP_VERIFY_FAILED',
@@ -166,8 +167,8 @@ router.post('/verify', authenticateSupabaseUser, async (req, res) => {
     }
 
     // 4. VERIFICATION SUCCESSFUL!
-    // ONE-TIME USE: Delete challenge from Supabase PostgreSQL immediately
-    await otpStore.del(userId);
+    // ONE-TIME USE: Delete challenge key immediately
+    await redis.del(otpKey);
 
     // Issue Secure 2FA Session Verification Token
     const verifiedSessionToken = hashOTP(`${userId}:${Date.now()}:verified_session`);
@@ -181,7 +182,7 @@ router.post('/verify', authenticateSupabaseUser, async (req, res) => {
       maxAge: 8 * 60 * 60 * 1000 // 8 Hours Session TTL
     });
 
-    // Log Security Audit Success Event
+    // Log Security Audit Event
     await logSecurityAudit({
       action: 'OTP_VERIFY_SUCCESS',
       status: 'success',
@@ -208,41 +209,34 @@ router.post('/resend', authenticateSupabaseUser, async (req, res) => {
     const userId = req.user.id;
     const email = req.user.email;
 
-    // 1. Check 60-second Cooldown
-    const existingChallenge = await otpStore.get(userId);
-    if (existingChallenge && existingChallenge.lastSentAt) {
-      const secondsSinceLastSent = (Date.now() - new Date(existingChallenge.lastSentAt).getTime()) / 1000;
-      if (secondsSinceLastSent < 60) {
-        const remaining = Math.ceil(60 - secondsSinceLastSent);
-        return res.status(429).json({
-          error: `Please wait ${remaining} seconds before requesting another code.`,
-          cooldownRemaining: remaining
-        });
-      }
-    }
+    const cooldownKey = `login_cooldown:${userId}`;
+    const activeCooldown = await redis.get(cooldownKey);
 
-    // 2. Invalidate previous OTP challenge
-    await otpStore.del(userId);
-
-    // 3. Generate new 6-digit OTP & HMAC Hash
-    const newOtp = generateOTP();
-    const newOtpHash = hashOTP(newOtp);
-
-    // 4. Reset attempts to 0, expires_at to +5 minutes
-    await otpStore.set(userId, { otpHash: newOtpHash, attempts: 0, ttlSeconds: 300 });
-
-    // 5. Send new OTP via Brevo REST API v3
-    const emailResult = await sendBrevoOTPEmail(email, newOtp);
-
-    if (!emailResult.success) {
-      await otpStore.del(userId);
-      return res.status(500).json({
-        error: 'Failed to send verification code. Please try again.',
-        reason: emailResult.reason
+    if (activeCooldown) {
+      return res.status(429).json({
+        error: 'Please wait 60 seconds before requesting another code.',
+        cooldownRemaining: 60
       });
     }
 
-    // 6. Security Audit Log
+    const otpKey = `login_otp:${userId}`;
+    await redis.del(otpKey);
+
+    const newOtp = generateOTP();
+    const newOtpHash = hashOTP(newOtp);
+
+    await redis.set(otpKey, {
+      otpHash: newOtpHash,
+      attempts: 0,
+      createdAt: new Date().toISOString(),
+      lastSentAt: new Date().toISOString(),
+      email
+    }, 300);
+
+    await redis.set(cooldownKey, 'active', 60);
+
+    const emailResult = await sendBrevoOTPEmail(email, newOtp);
+
     await logSecurityAudit({
       action: 'OTP_RESEND',
       status: 'success',
@@ -258,8 +252,8 @@ router.post('/resend', authenticateSupabaseUser, async (req, res) => {
       resendCooldownSeconds: 60
     });
   } catch (error) {
-    console.error('[2FA Resend Endpoint Error]:', error);
-    return res.status(500).json({ error: 'Failed to send verification code. Please try again.' });
+    console.error('[2FA Resend Error]:', error);
+    return res.status(500).json({ error: 'Internal server error resending code.' });
   }
 });
 
