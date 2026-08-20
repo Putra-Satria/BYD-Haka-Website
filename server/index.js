@@ -261,42 +261,51 @@ app.post('/api/admin/create-user', async (req, res) => {
             });
         }
 
-        const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
-        if (listErr) throw listErr;
-
-        const existingUser = listData?.users?.find(u => u.email?.toLowerCase() === normalizedEmail);
         let userId = '';
 
-        if (existingUser) {
-            userId = existingUser.id;
-            await supabaseAdmin.from('profiles').update({
-                full_name: full_name?.trim() || existingUser.user_metadata?.full_name || normalizedEmail.split('@')[0],
-                department: department || 'General',
-                access_disabled: false,
-            }).eq('user_id', userId);
-        } else {
-            if (!password || password.length < 6) {
-                return res.status(400).json({ error: 'Password minimal 6 karakter wajib diisi untuk akun baru' });
+        // Step 1: Try creating new user directly via Auth Admin API
+        const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+            email: normalizedEmail,
+            password: password || 'DefaultPass123!',
+            email_confirm: true,
+            user_metadata: {
+                full_name: full_name?.trim() || normalizedEmail.split('@')[0],
+            },
+        });
+
+        if (createErr) {
+            // If user already exists in auth.users, find existing user in profiles
+            const errLower = (createErr.message || '').toLowerCase();
+            if (errLower.includes('already') || errLower.includes('registered') || createErr.status === 422) {
+                const { data: existingProfile } = await supabaseAdmin
+                    .from('profiles')
+                    .select('user_id')
+                    .ilike('email', normalizedEmail)
+                    .maybeSingle();
+
+                if (existingProfile) {
+                    userId = existingProfile.user_id;
+                    await supabaseAdmin.from('profiles').update({
+                        full_name: full_name?.trim() || undefined,
+                        department: department || 'General',
+                        access_disabled: false,
+                    }).eq('user_id', userId);
+                } else {
+                    return res.status(400).json({ error: 'User already exists in Auth, please use login.' });
+                }
+            } else {
+                throw createErr;
             }
-
-            const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-                email: normalizedEmail,
-                password: password,
-                email_confirm: true,
-                user_metadata: {
-                    full_name: full_name?.trim() || normalizedEmail.split('@')[0],
-                },
-            });
-
-            if (createErr) throw createErr;
+        } else {
             userId = newUser.user.id;
-
+            // Update profile created by handle_new_user trigger
             await supabaseAdmin.from('profiles').update({
                 department: department || 'General',
                 access_disabled: false,
             }).eq('user_id', userId);
         }
 
+        // Step 2: Update role in user_roles
         const targetRole = role || 'user';
         await supabaseAdmin.from('user_roles').delete().eq('user_id', userId);
         await supabaseAdmin.from('user_roles').insert({
@@ -306,7 +315,7 @@ app.post('/api/admin/create-user', async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: existingUser ? 'User updated successfully' : 'User created successfully in Supabase Auth',
+            message: 'User created/updated successfully',
             user_id: userId,
         });
     } catch (err) {
