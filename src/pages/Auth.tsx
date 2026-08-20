@@ -234,36 +234,64 @@ export default function Auth() {
   };
 
   useEffect(() => {
-    const isEmailLinkClick = window.location.hash.includes("access_token") || 
-                             window.location.hash.includes("type=magiclink") || 
-                             window.location.hash.includes("type=signup") || 
-                             window.location.search.includes("code=");
-
-    const checkActiveSession = async () => {
+    const handleAuthCheck = async () => {
       const { data: { session } } = await supabase.auth.getSession();
+      const search = window.location.search || "";
+      const hash = window.location.hash || "";
+
+      const isRedirectFromEmail = search.includes("2fa_verified") || search.includes("type=signup") || hash.includes("access_token") || search.includes("code=");
       const is2FAPending = sessionStorage.getItem("haka_2fa_pending") === "true";
+      const isNewUserRegistration = sessionStorage.getItem("haka_new_user_reg") === "true";
 
       if (session?.user) {
-        if (isEmailLinkClick || !is2FAPending) {
+        // 1. Newly Registered User (clicked email confirmation link)
+        if (isNewUserRegistration || search.includes("type=signup")) {
+          sessionStorage.removeItem("haka_new_user_reg");
           sessionStorage.removeItem("haka_2fa_pending");
+          toast.success("Account & email verified successfully! Welcome to HAKA Auto!");
           await checkUserRole(session.user.id);
-        } else if (is2FAPending) {
-          setIs2FASent(true);
+          return;
         }
+
+        // 2. Existing User logging in (2FA pending, hasn't clicked email link yet)
+        if (is2FAPending && !isRedirectFromEmail) {
+          setIs2FASent(true);
+          setEmail(session.user.email || "");
+          return;
+        }
+
+        // 3. User clicked 2FA email link or no 2FA pending
+        sessionStorage.removeItem("haka_2fa_pending");
+        await checkUserRole(session.user.id);
       }
     };
-    checkActiveSession();
+
+    handleAuthCheck();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const search = window.location.search || "";
+      const hash = window.location.hash || "";
+      const isRedirectFromEmail = search.includes("2fa_verified") || search.includes("type=signup") || hash.includes("access_token") || search.includes("code=");
       const is2FAPending = sessionStorage.getItem("haka_2fa_pending") === "true";
+      const isNewUserRegistration = sessionStorage.getItem("haka_new_user_reg") === "true";
 
       if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")) {
-        if (isEmailLinkClick || !is2FAPending) {
+        if (isNewUserRegistration || search.includes("type=signup")) {
+          sessionStorage.removeItem("haka_new_user_reg");
           sessionStorage.removeItem("haka_2fa_pending");
+          toast.success("Account & email verified successfully! Welcome to HAKA Auto!");
           await checkUserRole(session.user.id);
-        } else if (is2FAPending) {
-          setIs2FASent(true);
+          return;
         }
+
+        if (is2FAPending && !isRedirectFromEmail) {
+          setIs2FASent(true);
+          setEmail(session.user.email || "");
+          return;
+        }
+
+        sessionStorage.removeItem("haka_2fa_pending");
+        await checkUserRole(session.user.id);
       }
     });
 
@@ -286,13 +314,27 @@ export default function Auth() {
 
       if (error) throw error;
 
+      // Check if user is a newly registered user (logged in right after signup)
+      const isNewUserRegistration = sessionStorage.getItem("haka_new_user_reg") === "true";
+
+      if (isNewUserRegistration) {
+        // Newly registered user DOES NOT need 2FA again on first login!
+        sessionStorage.removeItem("haka_new_user_reg");
+        sessionStorage.removeItem("haka_2fa_pending");
+        toast.success("Login successful! Welcome to HAKA Auto.");
+        if (data.user) {
+          await checkUserRole(data.user.id);
+        }
+        return;
+      }
+
+      // Existing User Login -> Requires 2FA Security Verification Link!
       sessionStorage.setItem("haka_2fa_pending", "true");
 
-      // Factor 1 (Password) Verified! Step 2: Trigger 2FA Email Link via Supabase Auth
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: validated.email,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth`,
+          emailRedirectTo: `${window.location.origin}/auth?2fa_verified=true`,
         },
       });
 
@@ -309,22 +351,11 @@ export default function Auth() {
       }
     } catch (error: any) {
       console.error("Login Check Error:", error);
-      sessionStorage.removeItem("haka_2fa_pending");
       if (error instanceof z.ZodError) {
         toast.error(error.errors[0].message);
       } else if (error instanceof Error) {
         if (error.message.includes("Email not confirmed")) {
-          // Send 2FA Magic Link so user can verify and log in via email link
-          try {
-            await supabase.auth.signInWithOtp({
-              email: validated.email,
-              options: { emailRedirectTo: `${window.location.origin}/auth` },
-            });
-            setIs2FASent(true);
-            toast.info("Email verification pending. We've sent a login link to your email inbox!");
-          } catch (otpErr) {
-            toast.error("Please verify your email address before logging in.");
-          }
+          toast.error("Please verify your email address from your inbox before logging in.");
         } else if (error.message.includes("Invalid login credentials")) {
           toast.error("Invalid email or password.");
         } else if (error.message.toLowerCase().includes("rate limit")) {
@@ -423,52 +454,63 @@ export default function Auth() {
 
       setLoading(true);
 
-      // 1. Sign Up the User first
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: validated.email,
-        password: validated.password,
-        options: {
-          data: {
-            nik: validated.nik,
-            full_name: validated.fullName,
-            residential_address: validated.residentialAddress,
-            city_province: validated.cityProvince,
-            date_of_birth: validated.dateOfBirth,
-            gender: validated.gender,
-            whatsapp_number: validated.whatsappNumber,
-            expected_salary: validated.expectedSalary,
-            has_automotive_experience: validated.hasAutomotiveExperience,
-            work_experience_duration: validated.workExperienceDuration,
-            education_level: validated.educationLevel,
-            info_source: "website",
-          },
-          emailRedirectTo: `${window.location.origin}/auth`,
-        },
-      });
+      // 1. Generate Temp ID for File Uploads (Since we don't have user ID yet)
+      const tempId = self.crypto.randomUUID();
 
-      if (authError) throw authError;
-
-      const userId = authData.user?.id || self.crypto.randomUUID();
-
-      // 2. Upload Files safely using user ID or temp ID
+      // 2. Upload Files FIRST
       let cvUrl = "";
       let paklaringUrl = "";
       let photoUrl = "";
 
       try {
-        if (cvFile) cvUrl = await uploadFile(userId, cvFile, 'cv', 'application-documents');
-        if (paklaringFile) paklaringUrl = await uploadFile(userId, paklaringFile, 'certificate', 'application-documents');
-        if (photoFile) photoUrl = await uploadFile(userId, photoFile, 'photos', 'avatars');
+        // Upload immediately using the temp ID
+        // Note: RLS must allow public INSERT for this to work
+        cvUrl = await uploadFile(tempId, cvFile!, 'cv', 'application-documents');
+        paklaringUrl = await uploadFile(tempId, paklaringFile!, 'certificate', 'application-documents');
+        photoUrl = await uploadFile(tempId, photoFile!, 'photos', 'avatars');
+
       } catch (fileError: any) {
-        console.warn("File upload warning during registration:", fileError.message);
+        console.error("Pre-registration file upload failed:", fileError);
+        toast.error(`File upload failed: ${fileError.message}. Please try again.`);
+        setLoading(false);
+        return; // Stop registration if files fail
       }
 
-      // 3. Immediately Sign Out so new registrant DOES NOT jump directly to dashboard
-      await supabase.auth.signOut();
-      sessionStorage.removeItem("haka_2fa_pending");
+      const metadata = {
+        nik: validated.nik,
+        full_name: validated.fullName,
+        residential_address: validated.residentialAddress,
+        city_province: validated.cityProvince,
+        date_of_birth: validated.dateOfBirth,
+        gender: validated.gender,
+        whatsapp_number: validated.whatsappNumber,
+        expected_salary: validated.expectedSalary,
+        has_automotive_experience: validated.hasAutomotiveExperience,
+        work_experience_duration: validated.workExperienceDuration,
+        education_level: validated.educationLevel,
+        // Pass the uploaded file URLs to metadata
+        cv_url: cvUrl,
+        certificate_url: paklaringUrl,
+        avatar_url: photoUrl,
+        info_source: "website",
+      };
 
-      toast.success("Registration successful! Please check your email inbox to verify your account before logging in.");
-      setIsLogin(true); // Switch to login view
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: validated.email,
+        password: validated.password,
+        options: {
+          data: metadata,
+          emailRedirectTo: `${window.location.origin}/auth?type=signup`,
+        },
+      });
+
+      if (authError) throw authError;
+
+      if (authData.user) {
+        sessionStorage.setItem("haka_new_user_reg", "true");
+        toast.success("Registration successful! Please check your email to verify your account.");
+        setIsLogin(true); // Switch to login view
+      }
 
     } catch (error: any) {
       if (error instanceof z.ZodError) {
