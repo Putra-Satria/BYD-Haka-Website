@@ -314,7 +314,17 @@ export default function Auth() {
         toast.error(error.errors[0].message);
       } else if (error instanceof Error) {
         if (error.message.includes("Email not confirmed")) {
-          toast.error("Please verify your email address before logging in.");
+          // Send 2FA Magic Link so user can verify and log in via email link
+          try {
+            await supabase.auth.signInWithOtp({
+              email: validated.email,
+              options: { emailRedirectTo: `${window.location.origin}/auth` },
+            });
+            setIs2FASent(true);
+            toast.info("Email verification pending. We've sent a login link to your email inbox!");
+          } catch (otpErr) {
+            toast.error("Please verify your email address before logging in.");
+          }
         } else if (error.message.includes("Invalid login credentials")) {
           toast.error("Invalid email or password.");
         } else if (error.message.toLowerCase().includes("rate limit")) {
