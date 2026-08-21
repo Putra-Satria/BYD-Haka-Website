@@ -168,6 +168,13 @@ async function fetchAlertsFromWazuhAPI() {
     return items;
 }
 
+function compressIPv6(ip) {
+    if (!ip || ip === "-" || ip === "::") return "-";
+    if (ip === "0000:0000:0000:0000:0000:0000:0000:0000") return "::";
+    if (ip === "ff02:0000:0000:0000:0000:0000:0000:0001") return "ff02::1";
+    return ip;
+}
+
 const fs = require('fs');
 
 async function fetchAlertsFromEveJson() {
@@ -185,22 +192,29 @@ async function fetchAlertsFromEveJson() {
                 if (item && item.event_type === 'alert') {
                     const alertData = item.alert || {};
                     const httpData = item.http || {};
+
+                    // Skip temporary ICMP test rule (SID 9000001)
+                    if (String(alertData.signature_id) === '9000001') {
+                        continue;
+                    }
                     alerts.push({
                         id: item.flow_id ? String(item.flow_id) : Math.random().toString(36).substring(7),
                         timestamp: item.timestamp || new Date().toISOString(),
                         agent: 'LAPTOP-5GFOE079',
+                        agent_ip: '192.168.56.1',
                         event_type: 'alert',
-                        signature_id: alertData.signature_id || 0,
+                        signature_id: String(alertData.signature_id || 0),
                         signature: alertData.signature || 'Suricata Alert',
-                        severity: alertData.severity || 1,
-                        src_ip: item.src_ip || '-',
+                        severity: Number(alertData.severity || 1),
+                        src_ip: compressIPv6(item.src_ip),
                         src_port: item.src_port || 0,
-                        dest_ip: item.dest_ip || '-',
+                        dest_ip: compressIPv6(item.dest_ip),
                         dest_port: item.dest_port || 0,
-                        app_proto: item.app_proto || item.proto || 'http',
+                        app_proto: item.app_proto || item.proto || 'HTTP / TCP',
                         url: httpData.url || httpData.hostname || '-',
                         method: httpData.http_method || '-',
-                        status: httpData.status || 200
+                        status: httpData.status || 200,
+                        source: 'Suricata IDS'
                     });
                 }
             } catch (e) {
@@ -236,28 +250,38 @@ async function fetchAlerts() {
         }
     }
 
-    return rawAlerts.map(alert => {
+    return rawAlerts
+        .filter(alert => {
+            const alertData = alert.data?.alert || {};
+            const rule = alert.rule || {};
+            const sigId = String(alertData.signature_id ?? rule.id ?? '0');
+            return sigId !== '9000001';
+        })
+        .map(alert => {
         const data = alert.data || {};
         const alertData = data.alert || {};
         const rule = alert.rule || {};
+        const agent = alert.agent || {};
         const httpData = data.http || {};
 
         return {
             id: alert.id || data.flow_id || Math.random().toString(36).substring(7),
             timestamp: data.timestamp || alert.timestamp || new Date().toISOString(),
-            agent: alert.agent?.name || 'LAPTOP-5GFOE079',
+            agent: agent.name || 'LAPTOP-5GFOE079',
+            agent_ip: agent.ip || '192.168.56.1',
             event_type: data.event_type || 'alert',
-            signature_id: alertData.signature_id || 0,
-            signature: alertData.signature || rule.description || 'Unknown Signature',
-            severity: Number(alertData.severity) || mapSeverity(rule.level),
-            src_ip: data.src_ip || '',
-            src_port: Number(data.src_port) || 0,
-            dest_ip: data.dest_ip || '',
-            dest_port: Number(data.dest_port) || 0,
-            app_proto: data.app_proto || data.proto || '',
-            url: httpData.url || httpData.hostname || '',
-            method: httpData.http_method || '',
-            status: Number(httpData.status) || 0
+            signature_id: String(alertData.signature_id ?? rule.id ?? '0'),
+            signature: alertData.signature ?? rule.description ?? 'Suricata Alert',
+            severity: Number(alertData.severity ?? rule.level ?? 1),
+            src_ip: compressIPv6(data.src_ip || alert.src_ip),
+            src_port: Number(data.src_port || alert.src_port) || 0,
+            dest_ip: compressIPv6(data.dest_ip || alert.dest_ip),
+            dest_port: Number(data.dest_port || alert.dest_port) || 0,
+            app_proto: data.proto || data.app_proto || alert.app_proto || 'HTTP / TCP',
+            url: httpData.url || httpData.hostname || '-',
+            method: httpData.http_method || '-',
+            status: Number(httpData.status) || 200,
+            source: 'Suricata IDS'
         };
     });
 }

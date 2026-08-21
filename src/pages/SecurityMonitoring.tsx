@@ -828,12 +828,12 @@ export default function SecurityMonitoring() {
                     <tr>
                       <th className="p-4 text-left font-semibold">Time</th>
                       <th className="p-4 text-left font-semibold">Agent</th>
-                      <th className="p-4 text-left font-semibold">Signature</th>
+                      <th className="p-4 text-left font-semibold">Attack / Signature</th>
                       <th className="p-4 text-left font-semibold">Source IP</th>
                       <th className="p-4 text-left font-semibold">Destination</th>
                       <th className="p-4 text-left font-semibold">Protocol</th>
                       <th className="p-4 text-left font-semibold">Severity</th>
-                      <th className="p-4 text-left font-semibold">URL</th>
+                      <th className="p-4 text-left font-semibold">Source</th>
                     </tr>
                   </thead>
 
@@ -848,33 +848,35 @@ export default function SecurityMonitoring() {
                           {alert.agent}
                         </td>
 
-                        <td className="p-4 min-w-[280px]">
+                        <td className="p-4 min-w-[260px]">
                           <div className="font-semibold text-slate-900">{alert.signature}</div>
                           <div className="text-xs text-slate-500 mt-1">
                             Signature ID: {alert.signature_id}
                           </div>
                         </td>
 
-                        <td className="p-4 whitespace-nowrap text-slate-700 font-mono text-xs">
-                          {alert.src_ip}:{alert.src_port}
+                        <td className="p-4 whitespace-nowrap text-slate-700 font-mono text-xs" title={alert.src_ip}>
+                          {alert.src_ip}:{alert.src_port || "0"}
                         </td>
 
-                        <td className="p-4 whitespace-nowrap text-slate-700 font-mono text-xs">
-                          {alert.dest_ip}:{alert.dest_port}
+                        <td className="p-4 whitespace-nowrap text-slate-700 font-mono text-xs" title={alert.dest_ip}>
+                          {alert.dest_ip}:{alert.dest_port || "0"}
                         </td>
 
-                        <td className="p-4 uppercase text-slate-700 font-semibold text-xs">
-                          {alert.app_proto}
+                        <td className="p-4 uppercase text-slate-700 font-semibold text-xs whitespace-nowrap">
+                          {alert.app_proto || "HTTP / TCP"}
                         </td>
 
                         <td className="p-4">
                           <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${severityBadgeClass(alert.severity)}`}>
-                            Severity {alert.severity}
+                            {Number(alert.severity) >= 3 ? "HIGH" : Number(alert.severity) === 2 ? "MEDIUM" : "LOW"} (Level {alert.severity})
                           </span>
                         </td>
 
-                        <td className="p-4 max-w-[340px] truncate text-slate-600 font-mono text-xs" title={alert.url}>
-                          {alert.url}
+                        <td className="p-4 whitespace-nowrap text-slate-600 font-medium text-xs">
+                          <span className="inline-flex rounded border bg-amber-50 text-amber-700 border-amber-200 px-2 py-0.5 font-bold">
+                            Suricata IDS
+                          </span>
                         </td>
                       </tr>
                     ))}
