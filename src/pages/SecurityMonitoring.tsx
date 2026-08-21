@@ -448,7 +448,7 @@ export default function SecurityMonitoring() {
                     </Badge>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Tracked via 30-second heartbeat engine. Sessions with no activity for $\ge 3$ minutes auto-expire.
+                    Tracked via 30-second heartbeat engine. Sessions with no activity for ≥ 3 minutes auto-expire.
                   </p>
                 </div>
               </div>
@@ -612,7 +612,7 @@ export default function SecurityMonitoring() {
                   </Badge>
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Correlated session timeline from Guest entry $\rightarrow$ Login $\rightarrow$ 2FA $\rightarrow$ Actions $\rightarrow$ Session End.
+                  Correlated session timeline from Guest entry → Login → 2FA → Actions → Session End.
                 </p>
               </div>
 
@@ -897,7 +897,7 @@ export default function SecurityMonitoring() {
               Full User Access & Session Timeline
             </DialogTitle>
             <DialogDescription>
-              Detail kronologis lengkap satu sesi pengunjung dari Guest $\rightarrow$ Login $\rightarrow$ 2FA $\rightarrow$ Aktivitas $\rightarrow$ Exit / Alert.
+              Detail kronologis lengkap satu sesi pengunjung dari Guest → Login → 2FA → Aktivitas → Exit / Alert.
             </DialogDescription>
           </DialogHeader>
 

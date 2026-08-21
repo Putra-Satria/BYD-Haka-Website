@@ -81,6 +81,32 @@ export async function getClientIp(): Promise<string> {
 }
 
 /**
+ * Resolves the true user role by inspecting user_roles table first, then email pattern.
+ */
+export async function resolveUserRole(user: any): Promise<ActivityRole> {
+  if (!user) return "guest";
+  const email = (user.email || "").toLowerCase();
+
+  try {
+    const { data: roleRows } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id);
+
+    const roles = (roleRows || []).map((r: any) => r.role);
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("recruiter") || roles.includes("hrd")) return "recruiter";
+    if (roles.includes("applicant") || roles.includes("user")) return "applicant";
+  } catch (err) {
+    // fallback if DB query fails
+  }
+
+  if (email.includes("admin")) return "admin";
+  if (email.includes("recruiter") || email.includes("hrd")) return "recruiter";
+  return "applicant";
+}
+
+/**
  * Gets or initializes a stable session_id for the current browser session.
  */
 export function getOrCreateSessionId(): string {
@@ -144,16 +170,10 @@ export async function correlateSessionIdentity(user: any): Promise<void> {
   if (!user) return;
   const sessionId = getOrCreateSessionId();
   const clientIp = await getClientIp();
+  const role: ActivityRole = await resolveUserRole(user);
 
-  let role: ActivityRole = "applicant";
   const email = (user.email || "").toLowerCase();
   const name = user.user_metadata?.full_name || user.email?.split("@")[0] || "User";
-
-  if (email.includes("admin")) {
-    role = "admin";
-  } else if (email.includes("recruiter") || email.includes("hrd")) {
-    role = "recruiter";
-  }
 
   try {
     // 1. Update user_sessions record for this session_id
@@ -205,9 +225,7 @@ export async function sendHeartbeat(page?: string): Promise<void> {
     if (user) {
       email = user.email || null;
       name = user.user_metadata?.full_name || user.email?.split("@")[0] || null;
-      if (email?.includes("admin")) role = "admin";
-      else if (email?.includes("recruiter") || email?.includes("hrd")) role = "recruiter";
-      else role = "applicant";
+      role = await resolveUserRole(user);
     }
 
     await (supabase.from("user_sessions" as any) as any)
@@ -301,13 +319,7 @@ export async function logActivity(params: {
     let userName: string | null = params.userNameOverride || user?.user_metadata?.full_name || null;
 
     if (user && !params.roleOverride) {
-      if (user.email?.includes("admin")) {
-        role = "admin";
-      } else if (user.email?.includes("recruiter") || user.email?.includes("hrd")) {
-        role = "recruiter";
-      } else {
-        role = "applicant";
-      }
+      role = await resolveUserRole(user);
     }
 
     const currentPage = params.page || window.location.pathname;
