@@ -36,6 +36,8 @@ import {
   checkAndExpireInactiveSessions,
 } from "@/services/activityLogger";
 
+const queryClient = new QueryClient();
+
 function RouteActivityTracker() {
   const location = useLocation();
   const isFirstMount = useRef(true);
