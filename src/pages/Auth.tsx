@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { z } from "zod";
-import { buildSecureFilePath, logSecurityAudit, validateSecureUpload } from "@/lib/securityHardening";
+import { logSecurityAudit, validateSecureUpload, buildSecureFilePath } from "@/lib/securityHardening";
+import { logActivity } from "@/services/activityLogger";
 import { Eye, EyeOff, Mail, CheckCircle2, RefreshCw } from "lucide-react";
 import TopNav from "@/components/TopNav";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -306,6 +307,15 @@ export default function Auth() {
       const validated = loginSchema.parse({ email, password });
       setLoading(true);
 
+      await logActivity({
+        event_type: "authentication",
+        action: "login_attempt",
+        page: "/auth",
+        userEmailOverride: validated.email,
+        status: "info",
+        severity: "info",
+      });
+
       // Step 1: Verify Password
       const { data, error } = await supabase.auth.signInWithPassword({
         email: validated.email,
@@ -313,6 +323,15 @@ export default function Auth() {
       });
 
       if (error) throw error;
+
+      await logActivity({
+        event_type: "authentication",
+        action: "login_success",
+        page: "/auth",
+        userEmailOverride: validated.email,
+        status: "success",
+        severity: "info",
+      });
 
       // Step 2: Password correct! Immediately clear temporary local session so protected routes cannot be bypassed
       await supabase.auth.signOut();
@@ -335,10 +354,28 @@ export default function Auth() {
         }
       } else {
         setIs2FASent(true);
+        await logActivity({
+          event_type: "authentication",
+          action: "2fa_requested",
+          page: "/auth",
+          userEmailOverride: validated.email,
+          status: "info",
+          severity: "info",
+        });
         toast.success("Password verified! Sign-in verification link sent to your email.");
       }
     } catch (error: any) {
       console.error("Login Check Error:", error);
+      await logActivity({
+        event_type: "authentication",
+        action: "login_failed",
+        page: "/auth",
+        userEmailOverride: email,
+        status: "failed",
+        severity: error?.message?.includes("Invalid login credentials") ? "medium" : "low",
+        metadata: { error_message: error?.message },
+      });
+
       if (error instanceof z.ZodError) {
         toast.error(error.errors[0].message);
       } else if (error instanceof Error) {

@@ -4,6 +4,7 @@ import { Navigate } from "react-router-dom";
 import TopNav from "@/components/TopNav";
 import { useAdminCheck } from "@/hooks/useAdminCheck";
 import { supabase } from "@/integrations/supabase/client";
+import { logActivity } from "@/services/activityLogger";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -849,6 +850,16 @@ export default function AccessControl() {
           }
         }
 
+        await logActivity({
+          event_type: "admin",
+          action: "user_updated",
+          page: "/admin/access-control",
+          resource: normalizedEmail,
+          status: "success",
+          severity: "info",
+          metadata: { role: addForm.role, department: addForm.department },
+        });
+
         toast.success(`${addForm.full_name} berhasil ditambahkan/diperbarui di Access Control.`);
         setAddOpen(false);
         setAddForm({
@@ -922,6 +933,16 @@ export default function AccessControl() {
         }
 
         if (res.ok && resData.success) {
+          await logActivity({
+            event_type: "admin",
+            action: "user_created",
+            page: "/admin/access-control",
+            resource: normalizedEmail,
+            status: "success",
+            severity: "info",
+            metadata: { role: addForm.role, department: addForm.department },
+          });
+
           toast.success(`${addForm.full_name} berhasil dibuat di Supabase Auth & ditambahkan ke Access Control.`);
           setAddOpen(false);
           setAddForm({

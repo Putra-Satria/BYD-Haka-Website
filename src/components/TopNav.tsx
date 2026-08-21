@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { NotificationsPopover } from "@/components/NotificationsPopover";
+import { logActivity } from "@/services/activityLogger";
 // import hakaLogo from "@/assets/haka-logo-new.png";
 
 interface TopNavProps {
@@ -51,6 +52,23 @@ export default function TopNav({ isPublic = false }: TopNavProps) {
   }, []);
 
   const handleLogout = async () => {
+    await logActivity({
+      event_type: "authentication",
+      action: "logout",
+      page: location.pathname,
+      status: "success",
+      severity: "info",
+    });
+    await logActivity({
+      event_type: "session",
+      action: "session_ended",
+      page: location.pathname,
+      status: "info",
+      severity: "info",
+    });
+    sessionStorage.removeItem("byd_haka_session_id");
+    sessionStorage.removeItem("2fa_passed");
+
     const { error } = await supabase.auth.signOut();
     if (error) {
       toast.error("Logout failed");

@@ -26,7 +26,66 @@ import SecurityAudit from "./pages/SecurityAudit";
 import AccessControl from "./pages/AccessControl";
 import { SessionTimeout } from "./components/SessionTimeout";
 
+import { useEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
+import { logActivity } from "@/services/activityLogger";
+
 const queryClient = new QueryClient();
+
+function RouteActivityTracker() {
+  const location = useLocation();
+  const isFirstMount = useRef(true);
+  const lastPath = useRef("");
+
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      logActivity({
+        event_type: "session",
+        action: "website_opened",
+        page: location.pathname,
+        status: "info",
+        severity: "info",
+      });
+      logActivity({
+        event_type: "session",
+        action: "session_started",
+        page: location.pathname,
+        status: "info",
+        severity: "info",
+      });
+    }
+
+    if (lastPath.current !== location.pathname) {
+      lastPath.current = location.pathname;
+
+      let actionName = "page_view";
+      if (location.pathname === "/job-board" || location.pathname === "/lowongan") {
+        actionName = "job_board_viewed";
+      } else if (location.pathname.startsWith("/job-board/")) {
+        actionName = "job_detail_viewed";
+      } else if (location.pathname === "/admin") {
+        actionName = "admin_dashboard_viewed";
+      } else if (location.pathname === "/admin/access-control") {
+        actionName = "access_control_viewed";
+      } else if (location.pathname === "/security-monitoring") {
+        actionName = "security_monitoring_viewed";
+      } else if (location.pathname === "/applications") {
+        actionName = "recruiter_dashboard_viewed";
+      }
+
+      logActivity({
+        event_type: "navigation",
+        action: actionName,
+        page: location.pathname,
+        status: "info",
+        severity: "info",
+      });
+    }
+  }, [location]);
+
+  return null;
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -35,6 +94,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <SessionTimeout />
+        <RouteActivityTracker />
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/lowongan" element={<Landing />} />
