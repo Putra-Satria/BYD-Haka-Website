@@ -3,7 +3,7 @@ import TopNav from "@/components/TopNav";
 import { useRoleCheck } from "@/hooks/useRoleCheck";
 import { supabase } from "@/integrations/supabase/client";
 import { getWazuhAlerts, checkWazuhHealth, WazuhAlert, WazuhHealth } from "@/services/wazuhAlertService";
-import { ActivityRecord } from "@/services/activityLogger";
+import { ActivityRecord, UserSessionRecord } from "@/services/activityLogger";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Cell } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertTriangle, RefreshCw, ShieldAlert, Server, Activity, Globe, Wifi, WifiOff, FileText, FileSpreadsheet, User, Clock, CheckCircle2, XCircle, Info, Filter, Layers, Search } from "lucide-react";
+import { AlertTriangle, RefreshCw, ShieldAlert, Server, Activity, Globe, Wifi, WifiOff, FileText, FileSpreadsheet, User, Clock, CheckCircle2, XCircle, Info, Filter, Layers, Search, Users, ExternalLink, Radio } from "lucide-react";
 import { generateSecurityReportPDF, exportSecurityReportExcel } from "@/lib/reportGenerator";
 
 function formatTime(value?: string | null) {
@@ -31,6 +31,19 @@ function formatTime(value?: string | null) {
     dateStyle: "medium",
     timeStyle: "medium",
   }).format(date);
+}
+
+function formatRelativeTime(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  const diffSec = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (diffSec < 10) return "Just now";
+  if (diffSec < 60) return `${diffSec} seconds ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} min ago`;
+  return `${Math.floor(diffMin / 60)} hours ago`;
 }
 
 function severityBadgeClass(severity: number | string) {
@@ -49,7 +62,7 @@ function statusBadgeClass(status?: string, severity?: string) {
   if (sev === "critical" || sev === "4" || s === "denied") return "bg-red-100 text-red-700 border-red-200";
   if (sev === "high" || sev === "3" || s === "failed") return "bg-orange-100 text-orange-700 border-orange-200";
   if (sev === "medium" || sev === "2") return "bg-yellow-100 text-yellow-700 border-yellow-200";
-  if (s === "success") return "bg-emerald-100 text-emerald-700 border-emerald-200";
+  if (s === "success" || s === "active") return "bg-emerald-100 text-emerald-700 border-emerald-200";
   return "bg-blue-100 text-blue-700 border-blue-200";
 }
 
@@ -57,7 +70,7 @@ function sourceBadgeClass(source?: string) {
   const src = (source || "").toLowerCase();
   if (src === "wazuh") return "bg-purple-100 text-purple-700 border-purple-200";
   if (src === "suricata") return "bg-amber-100 text-amber-700 border-amber-200";
-  return "bg-emerald-100 text-emerald-700 border-emerald-200"; // application
+  return "bg-emerald-100 text-emerald-700 border-emerald-200";
 }
 
 export default function SecurityMonitoring() {
@@ -68,6 +81,7 @@ export default function SecurityMonitoring() {
 
   const [alerts, setAlerts] = useState<WazuhAlert[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityRecord[]>([]);
+  const [userSessions, setUserSessions] = useState<UserSessionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [activityLoading, setActivityLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>("");
@@ -89,19 +103,23 @@ export default function SecurityMonitoring() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionModalOpen, setSessionModalOpen] = useState(false);
 
-  const fetchActivityLogs = async () => {
+  const fetchActivityData = async () => {
     setActivityLoading(true);
     try {
-      const { data, error } = await (supabase.from("activity_logs" as any) as any)
-        .select("*")
-        .order("timestamp", { ascending: false })
-        .limit(200);
+      const [logsRes, sessRes] = await Promise.all([
+        (supabase.from("activity_logs" as any) as any).select("*").order("timestamp", { ascending: false }).limit(300),
+        (supabase.from("user_sessions" as any) as any).select("*").order("last_seen_at", { ascending: false }).limit(100)
+      ]);
 
-      if (!error && data) {
-        setActivityLogs(data as ActivityRecord[]);
+      if (!logsRes.error && logsRes.data) {
+        setActivityLogs(logsRes.data as ActivityRecord[]);
+      }
+
+      if (!sessRes.error && sessRes.data) {
+        setUserSessions(sessRes.data as UserSessionRecord[]);
       }
     } catch (err) {
-      console.warn("Could not fetch activity logs:", err);
+      console.warn("Could not fetch activity data:", err);
     } finally {
       setActivityLoading(false);
     }
@@ -126,31 +144,40 @@ export default function SecurityMonitoring() {
 
   useEffect(() => {
     fetchAlerts();
-    fetchActivityLogs();
+    fetchActivityData();
 
-    // Subscribe to Supabase Realtime changes on activity_logs
+    // Subscribe to Supabase Realtime changes on activity_logs & user_sessions
     const channel = supabase
-      .channel("live_activity_monitoring")
+      .channel("live_activity_and_sessions")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "activity_logs" },
+        { event: "*", schema: "public", table: "activity_logs" },
         (payload) => {
-          const newRecord = payload.new as ActivityRecord;
-          setActivityLogs((prev) => [newRecord, ...prev.slice(0, 199)]);
+          if (payload.eventType === "INSERT") {
+            const newRecord = payload.new as ActivityRecord;
+            setActivityLogs((prev) => [newRecord, ...prev.slice(0, 299)]);
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "user_sessions" },
+        (payload) => {
+          fetchActivityData();
         }
       )
       .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          setIsRealtimeActive(true);
-        } else {
-          setIsRealtimeActive(false);
-        }
+        setIsRealtimeActive(status === "SUBSCRIBED");
       });
 
     return () => {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  const activeSessions = useMemo(() => {
+    return userSessions.filter((s) => s.status === "active");
+  }, [userSessions]);
 
   const filteredAlerts = useMemo(() => {
     return alerts.filter(alert => {
@@ -183,38 +210,74 @@ export default function SecurityMonitoring() {
 
   const selectedSessionEvents = useMemo(() => {
     if (!selectedSessionId) return [];
-    return activityLogs
+    
+    // Application activity logs for this session
+    const appEvts = activityLogs
       .filter((log) => log.session_id === selectedSessionId)
-      .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
-  }, [activityLogs, selectedSessionId]);
+      .map((log) => ({
+        type: "app",
+        timestamp: log.timestamp,
+        title: log.action.replace(/_/g, " "),
+        page: log.page || log.resource || "/",
+        source: log.source,
+        status: log.status,
+        severity: log.severity,
+        details: log.metadata,
+      }));
 
-  const sessionMetadata = useMemo(() => {
-    if (selectedSessionEvents.length === 0) return null;
-    const first = selectedSessionEvents[0];
-    const last = selectedSessionEvents[selectedSessionEvents.length - 1];
+    // Correlated Suricata / Wazuh alerts for this session by IP & timeframe
+    const targetSession = userSessions.find((s) => s.session_id === selectedSessionId);
+    let secEvts: any[] = [];
 
-    const startTime = new Date(first.timestamp || 0).getTime();
-    const endTime = new Date(last.timestamp || 0).getTime();
-    const durationSec = Math.max(0, Math.round((endTime - startTime) / 1000));
+    if (targetSession) {
+      const startTime = new Date(targetSession.started_at).getTime() - 60000;
+      const endTime = targetSession.ended_at ? new Date(targetSession.ended_at).getTime() + 60000 : Date.now() + 60000;
 
-    const minutes = Math.floor(durationSec / 60);
-    const seconds = durationSec % 60;
-    const durationStr = `${minutes}m ${seconds}s`;
+      secEvts = alerts
+        .filter((alt) => {
+          const altTime = new Date(alt.timestamp).getTime();
+          const matchIp = !alt.src_ip || alt.src_ip === targetSession.ip_address || alt.src_ip.includes("127.0.0.1") || alt.src_ip.includes("0000:");
+          return matchIp && altTime >= startTime && altTime <= endTime;
+        })
+        .map((alt) => ({
+          type: "security",
+          timestamp: alt.timestamp,
+          title: `Suricata Alert: ${alt.signature}`,
+          page: `${alt.src_ip} $\\rightarrow$ ${alt.dest_ip}`,
+          source: "suricata",
+          status: "alert",
+          severity: String(alt.severity) === "3" || String(alt.severity) === "4" ? "high" : "medium",
+          details: { signature_id: alt.signature_id, protocol: alt.app_proto },
+        }));
+    }
 
-    const hasLogout = selectedSessionEvents.some((e) => e.action === "logout" || e.action === "session_ended");
+    const combined = [...appEvts, ...secEvts];
+    return combined.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+  }, [activityLogs, userSessions, alerts, selectedSessionId]);
 
-    return {
-      sessionId: first.session_id,
-      userEmail: first.user_email || "Guest User",
-      userName: first.user_name || "-",
-      role: first.role || "guest",
-      ipAddress: first.ip_address || "127.0.0.1",
-      startedAt: first.timestamp,
-      lastActivity: last.timestamp,
-      status: hasLogout ? "Ended" : "Active",
-      duration: durationStr,
-    };
-  }, [selectedSessionEvents]);
+  const selectedSessionRecord = useMemo(() => {
+    if (!selectedSessionId) return null;
+    const sess = userSessions.find((s) => s.session_id === selectedSessionId);
+    if (sess) return sess;
+
+    const firstEvt = activityLogs.find((l) => l.session_id === selectedSessionId);
+    if (firstEvt) {
+      return {
+        session_id: firstEvt.session_id,
+        user_id: firstEvt.user_id,
+        user_email: firstEvt.user_email,
+        user_name: firstEvt.user_name,
+        role: firstEvt.role,
+        ip_address: firstEvt.ip_address || "127.0.0.1",
+        current_page: firstEvt.page || "/",
+        started_at: firstEvt.timestamp || new Date().toISOString(),
+        last_seen_at: firstEvt.timestamp || new Date().toISOString(),
+        status: "ended",
+      } as UserSessionRecord;
+    }
+
+    return null;
+  }, [userSessions, activityLogs, selectedSessionId]);
 
   const stats = useMemo(() => {
     const highSeverity = alerts.filter((alert) => Number(alert.severity) >= 3).length;
@@ -284,29 +347,29 @@ export default function SecurityMonitoring() {
         <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-3">
-              <div className="inline-flex items-center gap-1.5 rounded-full border bg-white px-3 py-1 text-xs font-semibold text-primary shadow-sm">
+              <div className="inline-flex items-center gap-1.5 rounded-full border bg-white px-3 py-1 text-xs font-semibold text-primary shadow-xs">
                 <ShieldAlert className="h-3.5 w-3.5" />
                 Admin Only Access
               </div>
 
               {/* Health Indicators */}
-              <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold shadow-sm bg-white ${isRealtimeActive ? 'text-emerald-600 border-emerald-200' : 'text-amber-600 border-amber-200'}`}>
+              <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold shadow-xs bg-white ${isRealtimeActive ? 'text-emerald-600 border-emerald-200' : 'text-amber-600 border-amber-200'}`}>
                 <span className={`h-2 w-2 rounded-full ${isRealtimeActive ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
                 App Logger: {isRealtimeActive ? 'Connected' : 'Connecting'}
               </div>
 
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-emerald-600 shadow-sm">
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-emerald-600 shadow-xs">
                 <Activity className="h-3.5 w-3.5" />
                 Suricata IDS: Active
               </div>
 
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-emerald-600 shadow-sm">
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-emerald-600 shadow-xs">
                 <Wifi className="h-3.5 w-3.5" />
                 Wazuh Agent: Connected
               </div>
 
               {healthStatus && (
-                <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold shadow-sm bg-white ${healthStatus.wazuhConnected !== false ? 'text-emerald-600 border-emerald-200' : 'text-red-600 border-red-200'}`}>
+                <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold shadow-xs bg-white ${healthStatus.wazuhConnected !== false ? 'text-emerald-600 border-emerald-200' : 'text-red-600 border-red-200'}`}>
                   {healthStatus.wazuhConnected !== false ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
                   Wazuh Manager: {healthStatus.wazuhConnected !== false ? 'Online' : 'Offline'}
                 </div>
@@ -317,7 +380,7 @@ export default function SecurityMonitoring() {
               BYD HAKA Security Monitoring
             </h1>
             <p className="mt-1.5 max-w-3xl text-sm text-slate-600">
-              Real-time application activity trail & Suricata/Wazuh network security monitoring.
+              Real-time user session tracking, application activity stream, and Suricata/Wazuh network threat detection.
             </p>
           </div>
 
@@ -357,7 +420,7 @@ export default function SecurityMonitoring() {
                 <FileSpreadsheet className="h-4 w-4" />
                 Export Excel
               </Button>
-              <Button onClick={() => { fetchAlerts(); fetchActivityLogs(); }} disabled={loading} className="gap-2">
+              <Button onClick={() => { fetchAlerts(); fetchActivityData(); }} disabled={loading} className="gap-2">
                 <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
                 Refresh
               </Button>
@@ -368,20 +431,92 @@ export default function SecurityMonitoring() {
           </div>
         </div>
 
+        {/* SECTION: CURRENTLY ACTIVE USERS */}
+        <Card className="border-slate-200 shadow-xs mb-8 overflow-hidden bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white">
+          <CardHeader className="border-b border-slate-700 pb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30">
+                  <Users className="h-6 w-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-lg font-bold text-white">Active Users Currently Accessing BYD HAKA</CardTitle>
+                    <Badge variant="outline" className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
+                      <Radio className="h-3 w-3 mr-1 animate-pulse" />
+                      {activeSessions.length} ONLINE
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Tracked via 30-second heartbeat engine. Sessions with no activity for $\ge 3$ minutes auto-expire.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-0">
+            {activeSessions.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 text-sm">
+                Belum ada pengguna aktif saat ini.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
+                {activeSessions.map((sess) => (
+                  <div
+                    key={sess.session_id}
+                    onClick={() => {
+                      setSelectedSessionId(sess.session_id);
+                      setSessionModalOpen(true);
+                    }}
+                    className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-emerald-500/50 rounded-xl p-4 cursor-pointer transition-all duration-200 shadow-xs group"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="font-bold text-white group-hover:text-emerald-400 transition-colors flex items-center gap-1.5">
+                          <User className="h-4 w-4 text-emerald-400" />
+                          {sess.user_name || sess.user_email || "Guest Visitor"}
+                        </div>
+                        <p className="text-xs text-slate-400 font-mono mt-0.5 truncate max-w-[200px]" title={sess.user_email || sess.session_id}>
+                          {sess.user_email || sess.session_id}
+                        </p>
+                      </div>
+
+                      <span className="capitalize text-[10px] font-bold text-slate-300 bg-slate-700 px-2 py-0.5 rounded border border-slate-600">
+                        {sess.role}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-300">
+                      <div className="font-mono text-slate-400">
+                        Page: <span className="text-white font-semibold">{sess.current_page || "/"}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-emerald-400 font-medium">
+                        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                        {formatRelativeTime(sess.last_seen_at)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Stats Section */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-4 mb-8">
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="border-slate-200 shadow-xs">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">Total Alert</CardTitle>
               <Activity className="h-5 w-5 text-primary" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-slate-900">{stats.totalAlerts}</div>
-              <p className="text-xs text-slate-500 mt-1">Alert terbaru dari Wazuh</p>
+              <p className="text-xs text-slate-500 mt-1">Alert terbaru dari Wazuh / Suricata</p>
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="border-slate-200 shadow-xs">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">High Severity</CardTitle>
               <AlertTriangle className="h-5 w-5 text-orange-500" />
@@ -392,7 +527,7 @@ export default function SecurityMonitoring() {
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="border-slate-200 shadow-xs">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">Source IP</CardTitle>
               <Globe className="h-5 w-5 text-blue-500" />
@@ -403,7 +538,7 @@ export default function SecurityMonitoring() {
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="border-slate-200 shadow-xs">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">Latest Attack</CardTitle>
               <Server className="h-5 w-5 text-emerald-500" />
@@ -419,7 +554,7 @@ export default function SecurityMonitoring() {
 
         {/* Charts Section */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="border-slate-200 shadow-xs">
             <CardHeader className="pb-2">
               <CardTitle className="text-base text-slate-800">Severity Distribution</CardTitle>
             </CardHeader>
@@ -440,7 +575,7 @@ export default function SecurityMonitoring() {
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="border-slate-200 shadow-xs">
             <CardHeader className="pb-2">
               <CardTitle className="text-base text-slate-800">Alerts Timeline (24h)</CardTitle>
             </CardHeader>
@@ -465,19 +600,19 @@ export default function SecurityMonitoring() {
         </div>
 
         {/* SECTION: BYD HAKA LIVE ACTIVITY */}
-        <Card className="border-slate-200 shadow-sm mb-8 overflow-hidden">
+        <Card className="border-slate-200 shadow-xs mb-8 overflow-hidden">
           <CardHeader className="border-b bg-white pb-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <CardTitle className="text-xl text-slate-900">BYD HAKA Live Activity</CardTitle>
+                  <CardTitle className="text-xl text-slate-900">BYD HAKA Live Activity Stream</CardTitle>
                   <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                     <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse mr-1.5" />
-                    LIVE
+                    LIVE REALTIME
                   </Badge>
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Website access $\rightarrow$ authentication $\rightarrow$ navigation $\rightarrow$ recruitment actions $\rightarrow$ logout
+                  Correlated session timeline from Guest entry $\rightarrow$ Login $\rightarrow$ 2FA $\rightarrow$ Actions $\rightarrow$ Session End.
                 </p>
               </div>
 
@@ -554,11 +689,12 @@ export default function SecurityMonitoring() {
                     <tr>
                       <th className="p-3 text-left font-semibold">Time</th>
                       <th className="p-3 text-left font-semibold">User</th>
+                      <th className="p-3 text-left font-semibold">Email</th>
                       <th className="p-3 text-left font-semibold">Role</th>
                       <th className="p-3 text-left font-semibold">Activity</th>
                       <th className="p-3 text-left font-semibold">Page / Resource</th>
+                      <th className="p-3 text-left font-semibold">Session ID</th>
                       <th className="p-3 text-left font-semibold">Source</th>
-                      <th className="p-3 text-left font-semibold">IP Address</th>
                       <th className="p-3 text-left font-semibold">Status</th>
                     </tr>
                   </thead>
@@ -578,7 +714,11 @@ export default function SecurityMonitoring() {
                         </td>
 
                         <td className="p-3 whitespace-nowrap font-medium text-slate-800">
-                          {log.user_email || log.user_name || "Guest"}
+                          {log.user_name || (log.user_email ? log.user_email.split('@')[0] : "Guest")}
+                        </td>
+
+                        <td className="p-3 whitespace-nowrap text-xs text-slate-600 font-mono">
+                          {log.user_email || "-"}
                         </td>
 
                         <td className="p-3 whitespace-nowrap">
@@ -595,14 +735,14 @@ export default function SecurityMonitoring() {
                           {log.page || log.resource || "/"}
                         </td>
 
+                        <td className="p-3 whitespace-nowrap text-slate-500 font-mono text-xs max-w-[110px] truncate" title={log.session_id}>
+                          {log.session_id}
+                        </td>
+
                         <td className="p-3 whitespace-nowrap">
                           <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-bold uppercase ${sourceBadgeClass(log.source)}`}>
                             {log.source === "application" ? "APP" : log.source}
                           </span>
-                        </td>
-
-                        <td className="p-3 whitespace-nowrap text-slate-600 font-mono text-xs">
-                          {log.ip_address || "127.0.0.1"}
                         </td>
 
                         <td className="p-3 whitespace-nowrap">
@@ -655,13 +795,13 @@ export default function SecurityMonitoring() {
         </div>
 
         {/* Wazuh Security Alerts Table */}
-        <Card className="border-slate-200 shadow-sm overflow-hidden">
+        <Card className="border-slate-200 shadow-xs overflow-hidden">
           <CardHeader className="border-b bg-white">
             <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
               <div>
-                <CardTitle className="text-xl text-slate-900">Wazuh Security Alerts</CardTitle>
+                <CardTitle className="text-xl text-slate-900">Wazuh & Suricata Network Security Alerts</CardTitle>
                 <p className="text-sm text-slate-500 mt-1">
-                  Data diambil dari API internal yang membaca alert Wazuh.
+                  Alert nyata dari Suricata IDS yang ditangkap oleh Wazuh Manager.
                 </p>
               </div>
               <Badge variant="outline" className="w-fit">
@@ -715,15 +855,15 @@ export default function SecurityMonitoring() {
                           </div>
                         </td>
 
-                        <td className="p-4 whitespace-nowrap text-slate-700">
+                        <td className="p-4 whitespace-nowrap text-slate-700 font-mono text-xs">
                           {alert.src_ip}:{alert.src_port}
                         </td>
 
-                        <td className="p-4 whitespace-nowrap text-slate-700">
+                        <td className="p-4 whitespace-nowrap text-slate-700 font-mono text-xs">
                           {alert.dest_ip}:{alert.dest_port}
                         </td>
 
-                        <td className="p-4 uppercase text-slate-700">
+                        <td className="p-4 uppercase text-slate-700 font-semibold text-xs">
                           {alert.app_proto}
                         </td>
 
@@ -733,7 +873,7 @@ export default function SecurityMonitoring() {
                           </span>
                         </td>
 
-                        <td className="p-4 max-w-[340px] truncate text-slate-600" title={alert.url}>
+                        <td className="p-4 max-w-[340px] truncate text-slate-600 font-mono text-xs" title={alert.url}>
                           {alert.url}
                         </td>
                       </tr>
@@ -752,40 +892,40 @@ export default function SecurityMonitoring() {
           <DialogHeader>
             <DialogTitle className="text-xl flex items-center gap-2">
               <Layers className="h-5 w-5 text-primary" />
-              Session Activity Timeline
+              Full User Access & Session Timeline
             </DialogTitle>
             <DialogDescription>
-              Detail kronologis aktivitas pengguna dalam satu sesi browser.
+              Detail kronologis lengkap satu sesi pengunjung dari Guest $\rightarrow$ Login $\rightarrow$ 2FA $\rightarrow$ Aktivitas $\rightarrow$ Exit / Alert.
             </DialogDescription>
           </DialogHeader>
 
-          {sessionMetadata && (
+          {selectedSessionRecord && (
             <div className="space-y-6 pt-2">
               {/* Metadata Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <div>
                   <p className="text-xs text-slate-500 font-medium">Session ID</p>
-                  <p className="text-xs font-mono font-bold text-slate-800 truncate" title={sessionMetadata.sessionId}>
-                    {sessionMetadata.sessionId}
+                  <p className="text-xs font-mono font-bold text-slate-800 truncate" title={selectedSessionRecord.session_id}>
+                    {selectedSessionRecord.session_id}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 font-medium font-mono">User / Email</p>
-                  <p className="text-xs font-semibold text-slate-900 truncate" title={sessionMetadata.userEmail}>
-                    {sessionMetadata.userEmail}
+                  <p className="text-xs text-slate-500 font-medium">User / Email</p>
+                  <p className="text-xs font-semibold text-slate-900 truncate" title={selectedSessionRecord.user_email || "Guest"}>
+                    {selectedSessionRecord.user_name || selectedSessionRecord.user_email || "Guest Visitor"}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 font-medium">Role</p>
                   <span className="capitalize text-xs font-semibold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
-                    {sessionMetadata.role}
+                    {selectedSessionRecord.role || "guest"}
                   </span>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 font-medium">Duration</p>
-                  <p className="text-xs font-semibold text-emerald-600">
-                    {sessionMetadata.duration}
-                  </p>
+                  <p className="text-xs text-slate-500 font-medium">Status</p>
+                  <span className={`capitalize text-xs font-bold px-2 py-0.5 rounded border ${selectedSessionRecord.status === "active" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-slate-200 text-slate-700 border-slate-300"}`}>
+                    {selectedSessionRecord.status}
+                  </span>
                 </div>
               </div>
 
@@ -793,27 +933,29 @@ export default function SecurityMonitoring() {
               <div>
                 <h4 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
                   <Clock className="h-4 w-4 text-slate-500" />
-                  Chronological Event Trail ({selectedSessionEvents.length} events)
+                  Full Chronological Session Trail ({selectedSessionEvents.length} events)
                 </h4>
 
                 <div className="relative pl-6 border-l-2 border-slate-200 space-y-4">
                   {selectedSessionEvents.map((evt, idx) => (
-                    <div key={evt.id || idx} className="relative group">
+                    <div key={idx} className="relative group">
                       {/* Timeline dot */}
                       <span className={`absolute -left-[31px] top-1.5 h-3.5 w-3.5 rounded-full border-2 bg-white ${
-                        evt.status === "denied" || evt.severity === "critical"
+                        evt.type === "security"
+                          ? "border-red-500 bg-red-100 animate-pulse"
+                          : evt.status === "denied"
                           ? "border-red-500 bg-red-50"
-                          : evt.status === "failed" || evt.severity === "high"
+                          : evt.status === "failed"
                           ? "border-orange-500 bg-orange-50"
                           : evt.status === "success"
                           ? "border-emerald-500 bg-emerald-50"
                           : "border-blue-500 bg-blue-50"
                       }`} />
 
-                      <div className="bg-white p-3 rounded-lg border border-slate-200 hover:border-slate-300 transition-colors shadow-2xs">
+                      <div className={`p-3 rounded-lg border transition-colors shadow-2xs ${evt.type === "security" ? "bg-red-50/70 border-red-200" : "bg-white border-slate-200 hover:border-slate-300"}`}>
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold text-slate-900 capitalize">
-                            {evt.action.replace(/_/g, " ")}
+                          <span className={`text-xs font-semibold capitalize ${evt.type === "security" ? "text-red-700 font-bold" : "text-slate-900"}`}>
+                            {evt.title}
                           </span>
                           <span className="text-xs text-slate-400 font-mono">
                             {formatTime(evt.timestamp)}
@@ -822,7 +964,7 @@ export default function SecurityMonitoring() {
 
                         <div className="flex flex-wrap items-center gap-2 mt-2">
                           <span className="text-xs text-slate-500 font-mono bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-                            {evt.page || "/"}
+                            {evt.page}
                           </span>
                           <span className={`inline-flex rounded border px-2 py-0.2 text-[10px] font-bold uppercase ${sourceBadgeClass(evt.source)}`}>
                             {evt.source === "application" ? "APP" : evt.source}

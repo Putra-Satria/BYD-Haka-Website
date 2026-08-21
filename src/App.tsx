@@ -28,15 +28,20 @@ import { SessionTimeout } from "./components/SessionTimeout";
 
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
-import { logActivity } from "@/services/activityLogger";
-
-const queryClient = new QueryClient();
+import { supabase } from "@/integrations/supabase/client";
+import {
+  logActivity,
+  sendHeartbeat,
+  correlateSessionIdentity,
+  checkAndExpireInactiveSessions,
+} from "@/services/activityLogger";
 
 function RouteActivityTracker() {
   const location = useLocation();
   const isFirstMount = useRef(true);
   const lastPath = useRef("");
 
+  // 1. Initial Mount & Navigation Events
   useEffect(() => {
     if (isFirstMount.current) {
       isFirstMount.current = false;
@@ -54,6 +59,7 @@ function RouteActivityTracker() {
         status: "info",
         severity: "info",
       });
+      sendHeartbeat(location.pathname);
     }
 
     if (lastPath.current !== location.pathname) {
@@ -81,8 +87,53 @@ function RouteActivityTracker() {
         status: "info",
         severity: "info",
       });
+
+      sendHeartbeat(location.pathname);
     }
   }, [location]);
+
+  // 2. Identity Correlation & Heartbeat Timers
+  useEffect(() => {
+    // Initial check for existing session identity correlation
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        correlateSessionIdentity(session.user);
+      }
+    });
+
+    // Listen for Auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session?.user) {
+        correlateSessionIdentity(session.user);
+      }
+    });
+
+    // Send heartbeat every 30 seconds
+    const heartbeatInterval = setInterval(() => {
+      sendHeartbeat(window.location.pathname);
+    }, 30000);
+
+    // Scan & expire inactive sessions every 45 seconds
+    const expireInterval = setInterval(() => {
+      checkAndExpireInactiveSessions();
+    }, 45000);
+
+    // Best-effort signals for tab switch / close
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        sendHeartbeat(window.location.pathname);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      subscription.unsubscribe();
+      clearInterval(heartbeatInterval);
+      clearInterval(expireInterval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   return null;
 }
