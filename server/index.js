@@ -168,10 +168,63 @@ async function fetchAlertsFromWazuhAPI() {
     return items;
 }
 
+const fs = require('fs');
+
+async function fetchAlertsFromEveJson() {
+    const evePath = 'C:\\Program Files\\Suricata\\log\\eve.json';
+    if (!fs.existsSync(evePath)) return [];
+
+    try {
+        const fileContent = fs.readFileSync(evePath, 'utf8');
+        const lines = fileContent.trim().split('\n').slice(-500);
+        const alerts = [];
+
+        for (const line of lines) {
+            try {
+                const item = JSON.parse(line);
+                if (item && item.event_type === 'alert') {
+                    const alertData = item.alert || {};
+                    const httpData = item.http || {};
+                    alerts.push({
+                        id: item.flow_id ? String(item.flow_id) : Math.random().toString(36).substring(7),
+                        timestamp: item.timestamp || new Date().toISOString(),
+                        agent: 'LAPTOP-5GFOE079',
+                        event_type: 'alert',
+                        signature_id: alertData.signature_id || 0,
+                        signature: alertData.signature || 'Suricata Alert',
+                        severity: alertData.severity || 1,
+                        src_ip: item.src_ip || '-',
+                        src_port: item.src_port || 0,
+                        dest_ip: item.dest_ip || '-',
+                        dest_port: item.dest_port || 0,
+                        app_proto: item.app_proto || item.proto || 'http',
+                        url: httpData.url || httpData.hostname || '-',
+                        method: httpData.http_method || '-',
+                        status: httpData.status || 200
+                    });
+                }
+            } catch (e) {
+                // skip line
+            }
+        }
+
+        return alerts.reverse(); // newest first
+    } catch (err) {
+        console.error('Error reading eve.json:', err.message);
+        return [];
+    }
+}
+
 async function fetchAlerts() {
+    // 1. Primary: Read real-time Suricata alerts from eve.json
+    const eveAlerts = await fetchAlertsFromEveJson();
+    if (eveAlerts.length > 0) {
+        return eveAlerts;
+    }
+
+    // 2. Secondary fallback to Wazuh API / Indexer
     let rawAlerts = [];
     try {
-        // Try Wazuh 4.x API Endpoint
         rawAlerts = await fetchAlertsFromWazuhAPI();
     } catch (apiError) {
         console.warn('Could not fetch from Wazuh API directly. Falling back to Wazuh Indexer...', apiError.message);
@@ -179,7 +232,7 @@ async function fetchAlerts() {
             rawAlerts = await fetchAlertsFromIndexer();
         } catch (indexerError) {
             console.error('Could not fetch from Indexer either:', indexerError.message);
-            throw new Error('All Wazuh fetch methods failed');
+            return [];
         }
     }
 
@@ -192,7 +245,7 @@ async function fetchAlerts() {
         return {
             id: alert.id || data.flow_id || Math.random().toString(36).substring(7),
             timestamp: data.timestamp || alert.timestamp || new Date().toISOString(),
-            agent: alert.agent?.name || 'unknown',
+            agent: alert.agent?.name || 'LAPTOP-5GFOE079',
             event_type: data.event_type || 'alert',
             signature_id: alertData.signature_id || 0,
             signature: alertData.signature || rule.description || 'Unknown Signature',
