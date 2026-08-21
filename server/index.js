@@ -47,6 +47,46 @@ let alertsCache = null;
 let alertsCacheTime = 0;
 const CACHE_TTL = 5000; // 5 seconds
 
+const https = require('https');
+
+function httpsReq(url, options = {}) {
+    return new Promise((resolve, reject) => {
+        try {
+            const urlObj = new URL(url);
+            const reqOptions = {
+                hostname: urlObj.hostname,
+                port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+                path: urlObj.pathname + urlObj.search,
+                method: options.method || 'GET',
+                headers: options.headers || {},
+                rejectUnauthorized: false,
+            };
+
+            const req = https.request(reqOptions, (res) => {
+                let data = '';
+                res.on('data', (chunk) => data += chunk);
+                res.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(data);
+                        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, json: async () => parsed, text: async () => data });
+                    } catch (e) {
+                        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, json: async () => ({}), text: async () => data });
+                    }
+                });
+            });
+
+            req.on('error', (err) => reject(err));
+
+            if (options.body) {
+                req.write(typeof options.body === 'string' ? options.body : JSON.stringify(options.body));
+            }
+            req.end();
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
 async function getWazuhToken() {
     if (wazuhToken && Date.now() < tokenExpiresAt) {
         return wazuhToken;
@@ -54,7 +94,7 @@ async function getWazuhToken() {
 
     try {
         const credentials = Buffer.from(`${WAZUH_USER}:${WAZUH_PASS}`).toString('base64');
-        const response = await fetch(`${WAZUH_URL}/security/user/authenticate`, {
+        const response = await httpsReq(`${WAZUH_URL}/security/user/authenticate`, {
             method: 'POST',
             headers: {
                 'Authorization': `Basic ${credentials}`
@@ -88,9 +128,8 @@ function mapSeverity(level) {
 }
 
 async function fetchAlertsFromIndexer() {
-    // Attempting OpenSearch method
     const credentials = Buffer.from(`${WAZUH_USER}:${WAZUH_PASS}`).toString('base64');
-    const response = await fetch(`${INDEXER_URL}/wazuh-alerts-*/_search`, {
+    const response = await httpsReq(`${INDEXER_URL}/wazuh-alerts-*/_search`, {
         method: 'POST',
         headers: {
             'Authorization': `Basic ${credentials}`,
@@ -113,7 +152,8 @@ async function fetchAlertsFromIndexer() {
 
 async function fetchAlertsFromWazuhAPI() {
     const token = await getWazuhToken();
-    const response = await fetch(`${WAZUH_URL}/alerts?limit=500&sort=-timestamp&q=rule.groups=suricata`, {
+    // Try manager logs endpoint first
+    const response = await httpsReq(`${WAZUH_URL}/manager/logs?limit=500`, {
         headers: {
             'Authorization': `Bearer ${token}`
         }
@@ -124,7 +164,8 @@ async function fetchAlertsFromWazuhAPI() {
     }
 
     const data = await response.json();
-    return data.data?.items || [];
+    const items = data.data?.affected_items || data.data?.items || [];
+    return items;
 }
 
 async function fetchAlerts() {
