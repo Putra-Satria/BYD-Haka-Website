@@ -55,6 +55,31 @@ const SESSION_STORAGE_KEY = "byd_haka_session_id";
 const SESSION_START_TIME_KEY = "byd_haka_session_start_time";
 const INACTIVITY_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes timeout
 
+let cachedClientIp: string | null = null;
+
+export async function getClientIp(): Promise<string> {
+  if (cachedClientIp) return cachedClientIp;
+  try {
+    const stored = sessionStorage.getItem("byd_haka_client_ip");
+    if (stored) {
+      cachedClientIp = stored;
+      return stored;
+    }
+    const res = await fetch("http://localhost:3001/api/my-ip");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ip) {
+        let cleanIp = data.ip.replace(/^.*:/, '');
+        if (cleanIp === "1" || cleanIp === "127.0.0.1") cleanIp = "192.168.56.1";
+        cachedClientIp = cleanIp;
+        sessionStorage.setItem("byd_haka_client_ip", cleanIp);
+        return cleanIp;
+      }
+    }
+  } catch {}
+  return "192.168.56.1";
+}
+
 /**
  * Gets or initializes a stable session_id for the current browser session.
  */
@@ -118,6 +143,7 @@ function sanitizeMetadata(metadata?: Record<string, any>): Record<string, any> {
 export async function correlateSessionIdentity(user: any): Promise<void> {
   if (!user) return;
   const sessionId = getOrCreateSessionId();
+  const clientIp = await getClientIp();
 
   let role: ActivityRole = "applicant";
   const email = (user.email || "").toLowerCase();
@@ -138,6 +164,7 @@ export async function correlateSessionIdentity(user: any): Promise<void> {
         user_email: email,
         user_name: name,
         role: role,
+        ip_address: clientIp,
         last_seen_at: new Date().toISOString(),
         status: "active",
       }, { onConflict: "session_id" });
@@ -149,6 +176,7 @@ export async function correlateSessionIdentity(user: any): Promise<void> {
         user_email: email,
         user_name: name,
         role: role,
+        ip_address: clientIp,
       })
       .eq("session_id", sessionId)
       .is("user_id", null);
@@ -164,6 +192,7 @@ export async function sendHeartbeat(page?: string): Promise<void> {
   const sessionId = getOrCreateSessionId();
   const now = new Date().toISOString();
   const currentPage = page || window.location.pathname;
+  const clientIp = await getClientIp();
 
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -188,6 +217,7 @@ export async function sendHeartbeat(page?: string): Promise<void> {
         user_email: email,
         user_name: name,
         role: role,
+        ip_address: clientIp,
         current_page: currentPage,
         last_seen_at: now,
         status: "active",
@@ -232,7 +262,7 @@ export async function checkAndExpireInactiveSessions(): Promise<void> {
             user_name: sess.user_name,
             role: sess.role || "guest",
             page: sess.current_page || "/",
-            ip_address: sess.ip_address || "127.0.0.1",
+            ip_address: sess.ip_address || "192.168.56.1",
             status: "info",
             severity: "info",
             metadata: { end_reason: "inactivity_timeout" },
@@ -262,6 +292,7 @@ export async function logActivity(params: {
 }): Promise<void> {
   try {
     const sessionId = getOrCreateSessionId();
+    const clientIp = await getClientIp();
     const { data: { session } } = await supabase.auth.getSession();
     const user = session?.user;
 
@@ -293,7 +324,7 @@ export async function logActivity(params: {
       role: role,
       page: currentPage,
       resource: params.resource || null,
-      ip_address: "127.0.0.1",
+      ip_address: clientIp,
       status: params.status || "info",
       severity: params.severity || "info",
       metadata: sanitizeMetadata(params.metadata),
@@ -313,6 +344,7 @@ export async function logActivity(params: {
         user_email: userEmail,
         user_name: userName,
         role: role,
+        ip_address: clientIp,
         current_page: currentPage,
         last_seen_at: new Date().toISOString(),
         status: params.action === "logout" || params.action === "session_ended" ? "ended" : "active",

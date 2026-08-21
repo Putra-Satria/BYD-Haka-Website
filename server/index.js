@@ -442,6 +442,18 @@ app.post('/api/admin/create-user', async (req, res) => {
     }
 });
 
+app.get('/api/my-ip', (req, res) => {
+    let clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+                   req.socket.remoteAddress || 
+                   req.ip || 
+                   '192.168.56.1';
+    clientIp = clientIp.replace(/^.*:/, '');
+    if (clientIp === '1' || clientIp === '127.0.0.1') {
+        clientIp = '192.168.56.1';
+    }
+    res.json({ ip: clientIp });
+});
+
 app.get('/health', async (req, res) => {
     let connected = false;
     try {

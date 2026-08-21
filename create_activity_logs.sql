@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
     role TEXT DEFAULT 'guest' NOT NULL CHECK (role IN ('guest', 'user', 'applicant', 'recruiter', 'admin')),
     page TEXT,
     resource TEXT,
-    ip_address TEXT DEFAULT '127.0.0.1',
+    ip_address TEXT DEFAULT '192.168.56.1',
     status TEXT DEFAULT 'info' NOT NULL CHECK (status IN ('info', 'success', 'failed', 'denied')),
     severity TEXT DEFAULT 'info' NOT NULL CHECK (severity IN ('info', 'low', 'medium', 'high', 'critical')),
     metadata JSONB DEFAULT '{}'::jsonb,
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS public.user_sessions (
     user_email TEXT,
     user_name TEXT,
     role TEXT DEFAULT 'guest' NOT NULL CHECK (role IN ('guest', 'user', 'applicant', 'recruiter', 'admin')),
-    ip_address TEXT DEFAULT '127.0.0.1',
+    ip_address TEXT DEFAULT '192.168.56.1',
     current_page TEXT DEFAULT '/',
     started_at TIMESTAMPTZ DEFAULT now() NOT NULL,
     last_seen_at TIMESTAMPTZ DEFAULT now() NOT NULL,
@@ -58,23 +58,19 @@ ALTER TABLE public.user_sessions ENABLE ROW LEVEL SECURITY;
 -- Policies for activity_logs
 DROP POLICY IF EXISTS "Allow public insert activity logs" ON public.activity_logs;
 DROP POLICY IF EXISTS "Allow staff select activity logs" ON public.activity_logs;
+DROP POLICY IF EXISTS "Allow all select activity logs" ON public.activity_logs;
 
 CREATE POLICY "Allow public insert activity logs"
     ON public.activity_logs FOR INSERT WITH CHECK (true);
 
-CREATE POLICY "Allow staff select activity logs"
-    ON public.activity_logs FOR SELECT
-    USING (
-        auth.role() = 'authenticated' AND (
-            EXISTS (SELECT 1 FROM user_roles WHERE user_id = auth.uid() AND role IN ('admin', 'recruiter'))
-            OR EXISTS (SELECT 1 FROM auth.users WHERE id = auth.uid() AND (email LIKE '%admin%' OR email LIKE '%recruiter%' OR email LIKE '%hrd%'))
-        )
-    );
+CREATE POLICY "Allow all select activity logs"
+    ON public.activity_logs FOR SELECT USING (true);
 
 -- Policies for user_sessions
 DROP POLICY IF EXISTS "Allow public insert user sessions" ON public.user_sessions;
 DROP POLICY IF EXISTS "Allow public update user sessions" ON public.user_sessions;
 DROP POLICY IF EXISTS "Allow staff select user sessions" ON public.user_sessions;
+DROP POLICY IF EXISTS "Allow all select user sessions" ON public.user_sessions;
 
 CREATE POLICY "Allow public insert user sessions"
     ON public.user_sessions FOR INSERT WITH CHECK (true);
@@ -82,14 +78,8 @@ CREATE POLICY "Allow public insert user sessions"
 CREATE POLICY "Allow public update user sessions"
     ON public.user_sessions FOR UPDATE USING (true);
 
-CREATE POLICY "Allow staff select user sessions"
-    ON public.user_sessions FOR SELECT
-    USING (
-        auth.role() = 'authenticated' AND (
-            EXISTS (SELECT 1 FROM user_roles WHERE user_id = auth.uid() AND role IN ('admin', 'recruiter'))
-            OR EXISTS (SELECT 1 FROM auth.users WHERE id = auth.uid() AND (email LIKE '%admin%' OR email LIKE '%recruiter%' OR email LIKE '%hrd%'))
-        )
-    );
+CREATE POLICY "Allow all select user sessions"
+    ON public.user_sessions FOR SELECT USING (true);
 
 -- Realtime Publication
 DO $$
